@@ -93,8 +93,11 @@ function loadGlue(d) {
     (function poll() {
       const c = root[key];
       if (c && c.ready) {
+        const dir = d.file.replace(/[^/]*$/, '');
+        const bytes = performance.getEntriesByType('resource')
+          .filter((e) => e.name.includes(dir)).reduce((a, e) => a + (e.encodedBodySize || e.transferSize || 0), 0);
         resolve({
-          id: d.id, name: d.name, note: d.note, bytes: c.bytes || 0,
+          id: d.id, name: d.name, note: d.note, bytes: c.bytes || bytes,
           init: () => c.init(), loadLevel: () => c.load_level(), advance: (dt) => c.advance(dt),
           get: (i) => c.mem_get(i), set: (i, v) => c.mem_set(i, v), view: () => null,
         });

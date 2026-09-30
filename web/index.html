@@ -1716,6 +1716,7 @@ async function selectCore(id) {
     store.set('core', id);
     loadLevel(0, true);           // restart the attract-mode level on the new core
     if ($('coreInfo')) $('coreInfo').innerHTML = coreInfoHtml(be);
+    if ($('coreSel')) $('coreSel').value = id;
   } catch (err) {
     console.error(err);
     simBe = prev;

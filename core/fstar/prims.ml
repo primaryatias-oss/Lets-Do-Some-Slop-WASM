@@ -1,10 +1,10 @@
 (* Minimal replacement for F*'s OCaml Prims: F* [int] becomes a native OCaml int
    (so no zarith/GMP is needed and the result compiles with wasm_of_ocaml). *)
-type int = Stdlib.int
-type bool = Stdlib.bool
-type unit = Stdlib.unit
-type nat = Stdlib.int
-type string = Stdlib.string
+type nonrec int = int
+type nonrec bool = bool
+type nonrec unit = unit
+type nat = int
+type nonrec string = string
 let of_int (x : int) : int = x
 let int_zero : int = 0
 let int_one : int = 1

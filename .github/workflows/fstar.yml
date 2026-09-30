@@ -12,16 +12,12 @@ jobs:
           curl -sL https://github.com/FStarLang/FStar/releases/download/v2026.09.27/fstar-v2026.09.27-Linux-x86_64.tar.gz -o fstar.tgz
           mkdir -p $HOME/fst && tar xzf fstar.tgz -C $HOME/fst
           echo "FST=$HOME/fst/fstar" >> $GITHUB_ENV
-      - name: look around
-        run: |
-          echo "--- Float64.fsti"; find $FST -name 'FStar.Float64.fsti' -exec cat {} \; | head -60
-          echo "--- FStar_Float64.ml"; head -60 $FST/lib/fstar/lib/app/floats/FStar_Float64.ml
-          echo "--- Prims.ml head"; head -60 $FST/lib/fstar/lib/app/Prims.ml
-          echo "--- lib/app"; ls $FST/lib/fstar/lib/app | tr '\n' ' ' | head -c 1500
-          echo; echo "--- fstar options"; $FST/bin/fstar.exe --help 2>&1 | grep -iE "extract|codegen|lax|include|ext " | head -20
       - name: extract probe
         run: |
           cd core/fstar/probe
-          $FST/bin/fstar.exe --lax --include . --codegen OCaml --extract_module Test Test.fst 2>&1 | tail -30 || true
-          ls -la
+          F="$FST/bin/fstar.exe --lax --include . --cache_checked_modules --cache_dir _cache"
+          $F Prim.fst 2>&1 | tail -15
+          $F Test.fst 2>&1 | tail -15
+          $F --codegen OCaml --extract_module Test Test.fst 2>&1 | tail -15
+          ls -la . _cache 2>/dev/null | head -20
           echo "--- Test.ml"; cat Test.ml

@@ -3,21 +3,25 @@ on:
   push:
     branches: [fstar-dev]
 jobs:
-  probe:
+  fstar:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: install F* release
+      - name: install F* release + ocaml
         run: |
           curl -sL https://github.com/FStarLang/FStar/releases/download/v2026.09.27/fstar-v2026.09.27-Linux-x86_64.tar.gz -o fstar.tgz
           mkdir -p $HOME/fst && tar xzf fstar.tgz -C $HOME/fst
-          echo "FST=$HOME/fst/fstar" >> $GITHUB_ENV
-      - name: extract probe
+          echo "FSTAR=$HOME/fst/fstar" >> $GITHUB_ENV
+          sudo apt-get update -q && sudo apt-get install -y -q ocaml-nox
+      - name: extract
+        run: tools/build_fstar.sh 2>&1 | tail -60
+      - name: native build + compare with JS reference
         run: |
-          cd core/fstar/probe
-          F="$FST/bin/fstar.exe --lax --include . --cache_checked_modules --cache_dir _cache"
-          $F Prim.fst 2>&1 | tail -15
-          $F Test.fst 2>&1 | tail -15
-          $F --codegen OCaml --extract_module Test Test.fst 2>&1 | tail -15
-          ls -la . _cache 2>/dev/null | head -20
-          echo "--- Test.ml"; cat Test.ml
+          cd core/fstar
+          cp prims.ml prim.ml out/ && cp test_fstar.ml out/
+          cd out
+          ls
+          ocamlfind ocamlopt -unsafe prims.ml prim.ml Abi.ml Core.ml test_fstar.ml -o ol_fstar 2>&1 | head -60 || true
+          ls -la ol_fstar
+          cd ../../..
+          tools/ol_compare.sh core/fstar/out/ol_fstar

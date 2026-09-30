@@ -21,7 +21,7 @@ jobs:
           cp prims.ml prim.ml out/ && cp test_fstar.ml out/
           cd out
           ls
-          ocamlfind ocamlopt -unsafe prims.ml prim.ml Abi.ml Core.ml test_fstar.ml -o ol_fstar 2>&1 | head -60 || true
+          ocamlopt -unsafe prims.ml prim.ml Abi.ml Core.ml test_fstar.ml -o ol_fstar 2>&1 | head -60 || true
           ls -la ol_fstar
           cd ../../..
           tools/ol_compare.sh core/fstar/out/ol_fstar

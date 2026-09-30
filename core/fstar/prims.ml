@@ -25,3 +25,25 @@ let op_GreaterThan (a : int) (b : int) : bool = a > b
 let op_GreaterThanOrEqual (a : int) (b : int) : bool = a >= b
 let op_Equality (a : int) (b : int) : bool = a = b
 let op_disEquality (a : int) (b : int) : bool = a <> b
+let not (b : bool) : bool = Stdlib.not b
+let op_Modulus (a : int) (b : int) : int = a mod b
+let op_Division (a : int) (b : int) : int = a / b
+let op_Percent (a : int) (b : int) : int = a mod b
+let op_Slash (a : int) (b : int) : int = a / b
+let op_Star (a : int) (b : int) : int = a * b
+let op_Plus (a : int) (b : int) : int = a + b
+let op_Less (a : int) (b : int) : bool = a < b
+let op_Greater (a : int) (b : int) : bool = a > b
+let op_Less_Equals (a : int) (b : int) : bool = a <= b
+let op_Greater_Equals (a : int) (b : int) : bool = a >= b
+let op_Equals (a : int) (b : int) : bool = a = b
+let op_Tilde_Minus (a : int) : int = - a
+let min (a : int) (b : int) : int = if a <= b then a else b
+let abs (a : int) : int = if a >= 0 then a else - a
+let fst = Stdlib.fst
+let snd = Stdlib.snd
+let admit () = failwith "Prims.admit"
+let magic () = failwith "Prims.magic"
+let unsafe_coerce (x : 'a) : 'b = Obj.magic x
+let strcat (a : string) (b : string) : string = a ^ b
+let op_Hat (a : string) (b : string) : string = a ^ b

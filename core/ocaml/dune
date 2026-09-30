@@ -1,0 +1,5 @@
+(executable
+ (name glue)
+ (modes wasm)
+ (libraries js_of_ocaml)
+ (flags (:standard -w -a -unsafe)))

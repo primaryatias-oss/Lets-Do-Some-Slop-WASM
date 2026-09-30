@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Slop Runner - A Three.js Platformer</title>
-<meta name="description" content="Slop Runner: a tiny 2D platformer proof of concept rendered with Three.js in a single HTML file.">
+<title>Slop Runner - WASM Edition</title>
+<meta name="description" content="Slop Runner WASM Edition: a 2D platformer whose whole simulation runs in WebAssembly compiled from C, Rust, Zig, Go, Nim, OCaml, Haskell or F*, rendered with Three.js.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
@@ -119,6 +119,17 @@
   #muteBtn {
     position: absolute; right: 12px; top: 64px; z-index: 6; font-size: 8px; padding: 6px 8px; display: none;
   }
+
+  .pick { margin: 14px auto 6px; max-width: 460px; text-align: left; border: 3px dashed #8c73c9; padding: 10px 12px; background: rgba(60,40,110,.35); }
+  .pick label { display: block; font-size: 8px; color: #b59ae0; margin-bottom: 8px; letter-spacing: 1px; }
+  .pick select {
+    width: 100%; font-family: inherit; font-size: 11px; padding: 10px 8px; color: var(--ink); background: var(--accent);
+    border: 3px solid #fff; box-shadow: 4px 4px 0 #000; cursor: pointer; text-transform: uppercase;
+  }
+  .pick .info { font-size: 8px; line-height: 1.8; margin-top: 10px; color: #e9dcff; min-height: 30px; }
+  .pick .info b { color: var(--accent); }
+  .pick .info.err { color: #ff8b9f; }
+  #core-badge { position: absolute; left: 12px; bottom: 10px; font-size: 8px; opacity: .8; text-shadow: 1px 1px 0 #000; pointer-events: none; }
   #fatal { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 30px; z-index: 20; background: #200; font-size: 12px; line-height: 2; }
 </style>
 </head>
@@ -141,11 +152,15 @@
   </div>
   <button class="pix alt" id="muteBtn">SND ON</button>
   <div id="screen"></div>
-  <div id="corner">SLOP RUNNER v1.0 - three.js</div>
+  <div id="corner">SLOP RUNNER v2.0 - three.js + WASM</div>
+  <div id="core-badge"></div>
   <div id="fatal"></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="abi.js"></script>
+<script src="core.js"></script>
+<script src="backends.js"></script>
 <script>
 'use strict';
 /* =====================================================================
@@ -1177,60 +1192,12 @@ function resize() {
     l.mesh.scale.set(view.w + 0.02, view.h + 0.02, 1);
     if (!l.sky) l.mesh.material.map.repeat.x = view.w / BG_TEX_W;
   });
+  if (typeof simBe !== 'undefined' && simBe) wr(G_VIEWW, view.w);
   const touch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
   $('touch').style.display = touch ? 'block' : 'none';
 }
 window.addEventListener('resize', resize);
 
-/* ---------------------------------------------------------------------
-   7. PHYSICS HELPERS + WORLD STATE
-   --------------------------------------------------------------------- */
-const Wd = {
-  L: null, w: 0, tiles: null,
-  coins: [], enemies: [], shots: [], platforms: [], springs: [], checks: [],
-  goal: null, boss: null, doorMesh: null, doorCells: [],
-  coinsTotal: 0,
-};
-const isSolid = (t) => t === 1 || t === 4;
-function tileAt(tx, ty) {
-  if (tx < 0 || tx >= Wd.w) return 1;
-  if (ty < 0 || ty >= LEVEL_H) return 0;
-  return Wd.tiles[ty * Wd.w + tx];
-}
-
-function moveBody(b, dt, dropThrough) {
-  b.hitX = 0; b.hitY = 0;
-  const hw = b.w / 2;
-  b.x += b.vx * dt;
-  const y0 = Math.floor(b.y + 0.02), y1 = Math.floor(b.y + b.h - 0.02);
-  if (b.vx > 0) {
-    const tx = Math.floor(b.x + hw);
-    for (let ty = y0; ty <= y1; ty++) if (isSolid(tileAt(tx, ty))) { b.x = tx - hw - 1e-4; b.vx = 0; b.hitX = 1; break; }
-  } else if (b.vx < 0) {
-    const tx = Math.floor(b.x - hw);
-    for (let ty = y0; ty <= y1; ty++) if (isSolid(tileAt(tx, ty))) { b.x = tx + 1 + hw + 1e-4; b.vx = 0; b.hitX = -1; break; }
-  }
-  const prevY = b.y;
-  b.y += b.vy * dt;
-  const x0 = Math.floor(b.x - hw + 1e-3), x1 = Math.floor(b.x + hw - 1e-3);
-  b.onGround = false;
-  if (b.vy <= 0) {
-    const ty = Math.floor(b.y);
-    for (let tx = x0; tx <= x1; tx++) {
-      const t = tileAt(tx, ty);
-      if (isSolid(t) || (t === 2 && !dropThrough && prevY >= ty + 1 - 0.02)) {
-        b.y = ty + 1; b.vy = 0; b.onGround = true; b.hitY = -1; break;
-      }
-    }
-  } else {
-    const ty = Math.floor(b.y + b.h);
-    for (let tx = x0; tx <= x1; tx++) {
-      if (isSolid(tileAt(tx, ty))) { b.y = ty - b.h - 1e-4; b.vy = 0; b.hitY = 1; break; }
-    }
-  }
-}
-
-const boxHit = (a, b) => Math.abs(a.x - b.x) < (a.w + b.w) / 2 && a.y < b.y + b.h && a.y + a.h > b.y;
 
 /* ---------------------------------------------------------------------
    8. PARTICLES + POPUPS + SCREEN FX
@@ -1364,700 +1331,232 @@ function buildLevelMesh(L) {
   return mesh;
 }
 
+
+
 /* ---------------------------------------------------------------------
-   10. ENTITY FACTORIES
+   10. SIM FACADE  -  the whole simulation lives in a WASM core.
+   The core owns ONE flat Float64 array (layout: tools/abi.py).  The host
+   writes input + level data into it, calls advance(dt), then reads state
+   and an event queue back out.  Everything below is rendering glue.
    --------------------------------------------------------------------- */
+let simBe = null;     // active backend {id, name, get, set, init, loadLevel, advance, view}
+let simM = null;      // Float64Array view of the core memory (or null -> use get/set calls)
+const rd = (i) => (simM ? simM[i] : simBe.get(i));
+const wr = (i, v) => { if (simM) simM[i] = v; else simBe.set(i, v); };
+
+const simStat = { ms: 0, steps: 0, frames: 0, avg: 0 };
+
+const SPEC_KIND = { c: SK_COIN, g: SK_GEM, H: SK_HEART, E: SK_SLIME, F: SK_BAT, W: SK_SAW, T: SK_TURRET, J: SK_SPRING, m: SK_PLAT_H, n: SK_PLAT_V, x: SK_CRUMBLE, K: SK_CHECK };
+
+function simLoad(L, attract) {
+  simBe.init();
+  simM = simBe.view();
+  wr(G_LW, L.w);
+  for (let ty = 0; ty < LEVEL_H; ty++) {
+    for (let tx = 0; tx < L.w; tx++) {
+      const v = L.tiles[ty * L.w + tx];
+      if (v) wr(TILE_BASE + ty * L.w + tx, v);
+    }
+  }
+  let n = 0;
+  const put = (k, x, y) => { wr(SPEC_BASE + n * SPEC_N, k); wr(SPEC_BASE + n * SPEC_N + 1, x); wr(SPEC_BASE + n * SPEC_N + 2, y); n++; };
+  for (const s of L.specs) if (SPEC_KIND[s.t] !== undefined) put(SPEC_KIND[s.t], s.tx + 0.5, s.ty);
+  if (L.bossSpec) {
+    put(SK_BOSS, L.bossSpec.x, L.bossSpec.y);
+    wr(G_BSPECX, L.bossSpec.x); wr(G_BSPECY, L.bossSpec.y); wr(G_BTRIG, L.bossSpec.trigger);
+  }
+  wr(G_NSPEC, n);
+  if (L.door) { wr(G_DOORON, 1); wr(G_DOORX, L.door.x); wr(G_DOORY0, L.door.y0); wr(G_DOORY1, L.door.y1); }
+  if (L.goal) { wr(G_GOALON, 1); wr(G_GOALX, L.goal.x); wr(G_GOALY, L.goal.y); }
+  wr(G_SPAWNX, L.spawn.x); wr(G_SPAWNY, L.spawn.y);
+  wr(G_VIEWW, view.w);
+  wr(G_RNG, (L.def.seed * 97 + 13) % 4294967296);
+  wr(G_MODE, attract ? MODE_TITLE : MODE_PLAY);
+  simBe.loadLevel();
+  simM = simBe.view();
+  if (attract) wr(P_DEAD, 1);
+}
+
+/* ---------- visual mirrors of the core's entity tables ---------- */
+const Wd = { L: null, w: 0, coins: [], enemies: [], plats: [], shots: [], springs: [], checks: [], goal: null, doors: [] };
+
 function clearWorld() {
   worldGroup.traverse((o) => { if (o.material && o.material.dispose) o.material.dispose(); if (o.geometry && o.geometry !== planeGeo) o.geometry.dispose(); });
   while (worldGroup.children.length) worldGroup.remove(worldGroup.children[0]);
-  Wd.coins = []; Wd.enemies = []; Wd.shots = []; Wd.platforms = []; Wd.springs = []; Wd.checks = [];
-  Wd.goal = null; Wd.boss = null; Wd.doorMesh = null; Wd.doorCells = [];
+  Object.assign(Wd, { coins: [], enemies: [], plats: [], shots: [], springs: [], checks: [], goal: null, doors: [] });
 }
 
-function addCoin(kind, x, y) {
-  const S = Art.S;
-  const mesh = makeSprite(kind === 'coin' ? S.coin[0] : kind === 'gem' ? S.gem : S.heart, kind === 'coin' ? 0.9 : 1, kind === 'coin' ? 0.9 : 1, 0.2);
-  mesh.position.set(x, y, 0.2);
-  Wd.coins.push({ kind, x, y, got: false, mesh, ph: Math.random() * 6, r: kind === 'coin' ? 0.55 : 0.65 });
-  if (kind !== 'heart') Wd.coinsTotal += kind === 'gem' ? 5 : 1;
-}
-
-function addEnemy(kind, x, y) {
-  const S = Art.S;
-  const e = {
-    kind, x, y, vx: 0, vy: 0, dir: Math.random() < 0.5 ? -1 : 1, alive: true, t: Math.random() * 10,
-    w: 0.8, h: 0.62, stomp: true, onGround: false, hitX: 0, hitY: 0, mesh: null, ox: x, oy: y, cd: 1 + Math.random(),
-  };
-  if (kind === 'slime') {
-    e.mesh = makeSprite(S.slime, 1, 1, 0.3);
-  } else if (kind === 'bat') {
-    e.w = 0.75; e.h = 0.5; e.mesh = makeSprite(S.bat[0], 1, 1, 0.3);
-  } else if (kind === 'saw') {
-    e.w = 0.78; e.h = 0.78; e.stomp = false; e.mesh = makeSprite(S.saw, 1.1, 1.1, 0.3); e.dir = 1; e.vx = 3;
-  } else if (kind === 'turret') {
-    e.w = 0.9; e.h = 0.8; e.stomp = false; e.mesh = makeSprite(S.turret, 1, 1, 0.3);
-  } else if (kind === 'boss') {
-    e.w = 2.5; e.h = 2.3; e.stomp = true; e.hp = 8; e.state = 'sleep'; e.st = 0; e.inv = 0; e.hp0 = 8;
-    e.mesh = makeSprite(S.boss, 3.1, 3.1, 0.3);
-    e.dir = -1;
+function buildEntities(L) {
+  const S = Art.S, T = Art.T, theme = L.def.theme;
+  for (let i = 0, n = rd(G_NCOINS); i < n; i++) {
+    const c = COIN_BASE + i * COIN_N, kind = rd(c + C_KIND);
+    const m = makeSprite(kind === SK_COIN ? S.coin[0] : kind === SK_GEM ? S.gem : S.heart, kind === SK_COIN ? 0.9 : 1, kind === SK_COIN ? 0.9 : 1, 0.2);
+    Wd.coins.push({ mesh: m, ph: Math.random() * 6, kind, c });
   }
-  Wd.enemies.push(e);
-  if (kind === 'boss') Wd.boss = e;
-  return e;
+  for (let i = 0, n = rd(G_NEN); i < n; i++) {
+    const b = EN_BASE + i * EN_N, kind = rd(b + E_KIND);
+    let m;
+    if (kind === EK_SLIME) m = makeSprite(S.slime, 1, 1, 0.3);
+    else if (kind === EK_BAT) m = makeSprite(S.bat[0], 1, 1, 0.3);
+    else if (kind === EK_SAW) m = makeSprite(S.saw, 1.1, 1.1, 0.3);
+    else if (kind === EK_TURRET) m = makeSprite(S.turret, 1, 1, 0.3);
+    else { m = makeSprite(S.boss, 3.1, 3.1, 0.3); m.visible = false; }
+    Wd.enemies.push({ mesh: m, kind, b, hidden: false });
+  }
+  for (let i = 0, n = rd(G_NPLT); i < n; i++) {
+    const p = PLT_BASE + i * PLT_N, crumble = rd(p + PT_KIND) === 2;
+    const count = crumble ? 1 : 3, meshes = [];
+    for (let k = 0; k < count; k++) meshes.push(makeSprite(slotTex(theme, crumble ? T.CRUMBLE : T.MOVER), 1, 1, 0.25));
+    Wd.plats.push({ meshes, p, crumble });
+  }
+  for (let i = 0, n = rd(G_NSPR); i < n; i++) {
+    const s = SPR_BASE + i * SPR_N;
+    Wd.springs.push({ mesh: makeSprite(S.spring[0], 1, 1, 0.2), s });
+  }
+  for (let i = 0, n = rd(G_NCK); i < n; i++) {
+    const c = CKT_BASE + i * CKT_N, cx = rd(c + CK_X), by = rd(c + CK_Y);
+    const pole = makeSprite(S.flagPole, 1, 2, 0.1); pole.position.set(cx, by + 1, 0.1);
+    const cloth = makeSprite(S.flagOff[0], 1, 1, 0.12); cloth.position.set(cx + 0.05, by + 1.35, 0.12);
+    Wd.checks.push({ cloth, c, t: Math.random() * 3 });
+  }
+  if (rd(G_DOORON)) {
+    for (let ty = rd(G_DOORY0); ty <= rd(G_DOORY1); ty++) {
+      const m = makeSprite(slotTex(theme, T.DOOR), 1, 1, 0.4);
+      m.position.set(rd(G_DOORX) + 0.5, ty + 0.5, 0.4); m.visible = false;
+      Wd.doors.push(m);
+    }
+  }
 }
 
-function addPlatform(kind, tx, ty) {
-  const top = ty + 0.75;
-  const p = { kind, x: tx + 0.5, x0: tx + 0.5, top, top0: top, prevTop: top, dx: 0, dy: 0, w: kind === 'crumble' ? 1 : 3, solid: true, t: Math.random() * 6, state: 'idle', timer: 0, vy: 0, meshes: [], home: { x: tx + 0.5, top } };
-  const theme = Wd.L.def.theme;
-  const n = kind === 'crumble' ? 1 : 3;
+function ensureGoal() {
+  if (!Wd.goal && rd(G_GOALON)) {
+    const m = makeSprite(Art.S.portal[0], 1.5, 2.25, 0.15);
+    Wd.goal = { mesh: m };
+  }
+}
+
+/* ---------------------------------------------------------------------
+   11. GAME (host-side) STATE
+   --------------------------------------------------------------------- */
+const G = { state: 'boot', lvl: 0, anim: 0, clearT: 0, attractT: 0, camX: 0, camY: 7, showTitleCore: true };
+const Pv = { mesh: null, sx: 1, sy: 1, runT: 0 };   // purely visual player state
+
+const popupAtPlayer = (txt, color) => FX.popup(rd(P_X), rd(P_Y) + 1.4, txt, color);
+
+/* ---------- core events -> sound, particles, popups ---------- */
+function squash(sx, sy) { Pv.sx = sx; Pv.sy = sy; }
+
+function processEvents() {
+  const n = rd(G_EVN);
   for (let i = 0; i < n; i++) {
-    p.meshes.push(makeSprite(slotTex(theme, kind === 'crumble' ? Art.T.CRUMBLE : Art.T.MOVER), 1, 1, 0.25));
-  }
-  Wd.platforms.push(p);
-  positionPlatform(p);
-}
-function positionPlatform(p) {
-  const n = p.meshes.length;
-  p.meshes.forEach((m, i) => m.position.set(p.x + (i - (n - 1) / 2), p.top - 0.5, 0.25));
-}
-
-function spawnSpecs(L) {
-  const S = Art.S;
-  for (const s of L.specs) {
-    const cx = s.tx + 0.5, by = s.ty;
-    switch (s.t) {
-      case 'c': addCoin('coin', cx, by + 0.5); break;
-      case 'g': addCoin('gem', cx, by + 0.5); break;
-      case 'H': addCoin('heart', cx, by + 0.5); break;
-      case 'E': addEnemy('slime', cx, by); break;
-      case 'F': addEnemy('bat', cx, by + 0.5); break;
-      case 'W': addEnemy('saw', cx, by + 0.02); break;
-      case 'T': addEnemy('turret', cx, by); break;
-      case 'J': {
-        const m = makeSprite(S.spring[0], 1, 1, 0.2);
-        m.position.set(cx, by + 0.5, 0.2);
-        Wd.springs.push({ x: cx, y: by, mesh: m, t: 0 });
+    const o = EV_BASE + i * EV_N;
+    const t = rd(o), x = rd(o + 1), y = rd(o + 2), a = rd(o + 3);
+    switch (t) {
+      case EV_JUMP:
+        Snd.play('jump'); squash(0.75, 1.3);
+        FX.emit(x, y, 5, { colors: [0xffffff, 0xd9d0f5], angle: Math.PI / 2, spread: 1.4, speed: 3, life: 0.4, gravity: 3 });
         break;
-      }
-      case 'm': addPlatform('h', s.tx, s.ty); break;
-      case 'n': addPlatform('v', s.tx, s.ty); break;
-      case 'x': addPlatform('crumble', s.tx, s.ty); break;
-      case 'K': {
-        const pole = makeSprite(S.flagPole, 1, 2, 0.1);
-        pole.position.set(cx, by + 1, 0.1);
-        const cloth = makeSprite(S.flagOff[0], 1, 1, 0.12);
-        cloth.position.set(cx + 0.05, by + 1.35, 0.12);
-        Wd.checks.push({ x: cx, y: by, on: false, cloth, t: Math.random() * 3 });
+      case EV_DOUBLE:
+        Snd.play('double'); squash(0.8, 1.25);
+        FX.emit(x, y, 10, { colors: [0x6fe7ff, 0xffffff], angle: -Math.PI / 2, spread: 1.2, speed: 4, life: 0.45, gravity: 2 });
         break;
-      }
-    }
-  }
-  if (L.goal) addGoal(L.goal.x, L.goal.y);
-  if (L.door) {
-    const T = Art.T;
-    const cells = [];
-    for (let ty = L.door.y0; ty <= L.door.y1; ty++) {
-      const m = makeSprite(slotTex(L.def.theme, T.DOOR), 1, 1, 0.4);
-      m.position.set(L.door.x + 0.5, ty + 0.5, 0.4);
-      m.visible = false;
-      cells.push({ ty, mesh: m });
-    }
-    Wd.doorCells = cells;
-  }
-  if (L.bossSpec) {
-    const b = addEnemy('boss', L.bossSpec.x, L.bossSpec.y);
-    b.mesh.visible = false;
-  }
-}
-
-function addGoal(x, y) {
-  const mesh = makeSprite(Art.S.portal[0], 1.5, 2.25, 0.15);
-  mesh.position.set(x, y + 1.1, 0.15);
-  Wd.goal = { x, y, mesh, t: 0 };
-}
-
-function setDoor(closed) {
-  const L = Wd.L;
-  if (!L.door) return;
-  for (const c of Wd.doorCells) {
-    Wd.tiles[c.ty * Wd.w + L.door.x] = closed ? 4 : 0;
-    c.mesh.visible = closed;
-  }
-}
-
-/* ---------------------------------------------------------------------
-   11. GAME STATE + PLAYER
-   --------------------------------------------------------------------- */
-const G = {
-  state: 'boot',        // boot | title | play | pause | clearing | clear
-  lvl: 0, time: 0, anim: 0,
-  coins: 0, kills: 0, deaths: 0, score: 0, bossKilled: false,
-  freeze: 0, checkpoint: { x: 3, y: 2 }, clearT: 0, attractT: 0,
-  camX: 0, camY: 7, bossActive: false, respawnT: 0,
-};
-
-const P = {
-  x: 0, y: 0, vx: 0, vy: 0, w: PLAYER.w, h: PLAYER.h, face: 1,
-  onGround: false, hitX: 0, hitY: 0, prevY: 0,
-  coyote: 0, buffer: 0, jumpsLeft: 1, wallDir: 0, wallGrace: 0, wallMem: 0, wallLock: 0,
-  dashT: 0, dashCd: 0, dashDir: 1, airDashUsed: false,
-  inv: 0, dropT: 0, hp: 3, maxHp: 3, dead: false, deadT: 0,
-  riding: null, safe: { x: 0, y: 0 }, safeT: 0,
-  sx: 1, sy: 1, runT: 0, mesh: null, trailT: 0, wasGround: false,
-};
-
-function resetPlayer(x, y) {
-  Object.assign(P, {
-    x, y, vx: 0, vy: 0, face: 1, onGround: false, coyote: 0, buffer: 0, jumpsLeft: 1, wallDir: 0, wallGrace: 0, wallLock: 0,
-    dashT: 0, dashCd: 0, airDashUsed: false, inv: 0, dropT: 0, dead: false, deadT: 0, riding: null, sx: 1, sy: 1,
-    safe: { x, y }, safeT: 0, prevY: y, wasGround: false,
-  });
-  if (P.mesh) P.mesh.visible = true;
-}
-
-function updatePlayer(dt) {
-  const ax = Input.axis;
-  P.prevY = P.y;
-  P.inv = Math.max(0, P.inv - dt);
-  P.dashCd -= dt; P.wallLock -= dt; P.buffer -= dt; P.dropT -= dt; P.wallGrace -= dt;
-
-  if (Input.pressed.jump) { Input.pressed.jump = false; P.buffer = PLAYER.buffer; }
-  const wantDash = Input.pressed.dash;
-  if (wantDash) Input.pressed.dash = false;
-
-  // ride moving platforms
-  if (P.riding && P.riding.solid && P.vy <= 0) {
-    P.x += P.riding.dx;
-    P.y = P.riding.top;
-  }
-
-  // grounded bookkeeping (from last step's collision result)
-  if (P.onGround) { P.coyote = PLAYER.coyote; P.jumpsLeft = 1; P.airDashUsed = false; }
-  else P.coyote -= dt;
-
-  // dash
-  if (wantDash && P.dashCd <= 0 && !P.airDashUsed) {
-    P.dashT = PLAYER.dashTime; P.dashCd = PLAYER.dashCooldown;
-    P.dashDir = ax || P.face; P.face = P.dashDir;
-    if (!P.onGround) P.airDashUsed = true;
-    Snd.play('dash');
-    FX.emit(P.x, P.y + 0.4, 8, { colors: [0x6fe7ff, 0xffffff], angle: P.dashDir > 0 ? Math.PI : 0, spread: 0.5, speed: 6, gravity: 0, life: 0.35 });
-  }
-
-  if (P.dashT > 0) {
-    P.dashT -= dt;
-    P.vx = P.dashDir * PLAYER.dashSpeed;
-    P.vy = 0;
-    P.trailT -= dt;
-    if (P.trailT <= 0) {
-      P.trailT = 0.025;
-      FX.emit(P.x, P.y + 0.45, 1, { colors: [0x6fe7ff, 0xb8f4ff], speed: 0.6, life: 0.35, size: 0.34, sizeMin: 0.28, gravity: 0 });
-    }
-    if (P.dashT <= 0) P.vx = P.dashDir * PLAYER.maxSpeed;
-  } else {
-    // horizontal control
-    if (P.wallLock <= 0) {
-      const target = ax * PLAYER.maxSpeed;
-      let acc;
-      if (ax === 0) acc = P.onGround ? PLAYER.decelGround : PLAYER.decelAir;
-      else {
-        acc = P.onGround ? PLAYER.accelGround : PLAYER.accelAir;
-        if (sign(P.vx) === -ax) acc *= 1.6;
-      }
-      P.vx = approach(P.vx, target, acc * dt);
-      if (ax) P.face = ax;
-    }
-
-    // wall contact
-    P.wallDir = 0;
-    if (!P.onGround && ax !== 0) {
-      const tx = Math.floor(P.x + ax * (P.w / 2 + 0.08));
-      if (isSolid(tileAt(tx, Math.floor(P.y + 0.3))) || isSolid(tileAt(tx, Math.floor(P.y + 0.75)))) {
-        P.wallDir = ax; P.wallGrace = 0.1; P.wallMem = ax;
-      }
-    }
-
-    // jumping
-    if (P.buffer > 0) {
-      if (Input.held.down && P.onGround && tileAt(Math.floor(P.x), Math.floor(P.y - 0.05)) === 2) {
-        P.dropT = 0.22; P.buffer = 0; P.y -= 0.06; P.onGround = false;
-      } else if (P.coyote > 0) {
-        P.vy = PLAYER.jumpV; P.buffer = 0; P.coyote = 0; P.onGround = false;
-        P.sx = 0.75; P.sy = 1.3;
-        Snd.play('jump');
-        FX.emit(P.x, P.y + 0.05, 5, { colors: [0xffffff, 0xd9d0f5], angle: Math.PI / 2, spread: 1.4, speed: 3, life: 0.4, gravity: 3 });
-      } else if (P.wallGrace > 0 && P.wallMem !== 0) {
-        P.vx = -P.wallMem * PLAYER.wallJumpX; P.vy = PLAYER.wallJumpY;
-        P.wallLock = PLAYER.wallLock; P.face = -P.wallMem; P.buffer = 0; P.wallGrace = 0;
-        P.jumpsLeft = 1; P.airDashUsed = false;
-        P.sx = 0.8; P.sy = 1.25;
-        Snd.play('wall');
-        FX.emit(P.x + P.wallMem * 0.3, P.y + 0.5, 6, { colors: [0xffffff], angle: P.wallMem > 0 ? Math.PI : 0, spread: 1, speed: 3, life: 0.4, gravity: 4 });
-      } else if (P.jumpsLeft > 0) {
-        P.vy = PLAYER.doubleV; P.jumpsLeft--; P.buffer = 0;
-        P.sx = 0.8; P.sy = 1.25;
-        Snd.play('double');
-        FX.emit(P.x, P.y + 0.05, 10, { colors: [0x6fe7ff, 0xffffff], angle: -Math.PI / 2, spread: 1.2, speed: 4, life: 0.45, gravity: 2 });
-      }
-    }
-
-    // gravity (variable height: release = heavier)
-    const g = P.vy > 0 ? (Input.held.jump ? PLAYER.gravity : PLAYER.gravity * 2.4) : PLAYER.fallGravity;
-    P.vy = Math.max(P.vy - g * dt, -PLAYER.maxFall);
-    if (P.wallDir && P.vy < -PLAYER.wallSlide) {
-      P.vy = -PLAYER.wallSlide;
-      if (Math.random() < 0.3) FX.emit(P.x + P.wallDir * 0.3, P.y + 0.5, 1, { colors: [0xffffff], speed: 1, life: 0.3, gravity: -1, size: 0.1 });
-    }
-  }
-
-  const vyPre = P.vy;
-  moveBody(P, dt, P.dropT > 0);
-
-  // platforms (one-way, carry)
-  P.riding = null;
-  if (vyPre <= 0 && P.dashT <= 0) {
-    for (const p of Wd.platforms) {
-      if (!p.solid) continue;
-      if (Math.abs(P.x - p.x) < p.w / 2 + P.w / 2 - 0.08 && P.prevY >= p.prevTop - 0.12 && P.y <= p.top + 0.02 && P.y >= p.top - 0.6) {
-        P.y = p.top; P.vy = 0; P.onGround = true; P.riding = p;
-        if (p.kind === 'crumble' && p.state === 'idle') { p.state = 'shake'; p.timer = 0.45; }
+      case EV_WALLJUMP:
+        Snd.play('wall'); squash(0.8, 1.25);
+        FX.emit(x, y, 6, { colors: [0xffffff], angle: a > 0 ? Math.PI : 0, spread: 1, speed: 3, life: 0.4, gravity: 4 });
         break;
-      }
-    }
-  }
-
-  // landing feedback
-  if (P.onGround && !P.wasGround && vyPre < -9) {
-    P.sx = 1.3; P.sy = 0.72;
-    Snd.play('land');
-    FX.emit(P.x, P.y + 0.05, 6, { colors: [0xffffff, 0xcfc4ee], angle: 0, spread: Math.PI, speed: 3.5, life: 0.35, gravity: 2 });
-  }
-  if (P.hitY === 1 && P.vy === 0) P.vy = -1;
-  P.wasGround = P.onGround;
-
-  // remember a safe respawn point
-  if (P.onGround && !P.riding) {
-    const ty = Math.floor(P.y) - 1;
-    const solidUnder = (x) => isSolid(tileAt(Math.floor(x), ty));
-    if (solidUnder(P.x - 0.6) && solidUnder(P.x + 0.6) && solidUnder(P.x - 1.6) && solidUnder(P.x + 1.6) && tileAt(Math.floor(P.x), Math.floor(P.y)) !== 3) {
-      P.safeT += dt;
-      if (P.safeT > 0.35) { P.safe.x = P.x; P.safe.y = P.y; }
-    } else P.safeT = 0;
-  } else P.safeT = 0;
-
-  // spikes
-  if (P.inv <= 0 && P.dashT <= 0) {
-    const x0 = Math.floor(P.x - P.w / 2), x1 = Math.floor(P.x + P.w / 2);
-    const y0 = Math.floor(P.y), y1 = Math.floor(P.y + P.h * 0.5);
-    for (let ty = y0; ty <= y1; ty++) {
-      for (let tx = x0; tx <= x1; tx++) {
-        if (tileAt(tx, ty) === 3) {
-          const sx0 = tx + 0.15, sx1 = tx + 0.85, sy1 = ty + 0.5;
-          if (P.x + P.w / 2 > sx0 && P.x - P.w / 2 < sx1 && P.y < sy1) {
-            if (hurtPlayer(tx + 0.5)) { P.vy = 15; P.vx = (P.x < tx + 0.5 ? -1 : 1) * 5; }
-            ty = y1 + 1; break;
-          }
-        }
-      }
-    }
-  }
-
-  // fell into a pit
-  if (P.y < -2.5) pitFall();
-}
-
-function hurtPlayer(srcX) {
-  if (P.inv > 0 || P.dashT > 0 || P.dead) return false;
-  P.hp--;
-  P.inv = PLAYER.invuln;
-  G.freeze = 0.08;
-  FX.shake = 0.55;
-  FX.flash(0.55);
-  Snd.play('hurt');
-  FX.emit(P.x, P.y + 0.5, 14, { colors: [0xff4f78, 0xffffff, 0xffd23f], speed: 7, life: 0.6 });
-  P.vx = (P.x < srcX ? -1 : 1) * 8.5; P.vy = 12;
-  P.wallLock = 0.18; P.dashT = 0;
-  if (P.hp <= 0) killPlayer();
-  return true;
-}
-
-function pitFall() {
-  if (P.dead) return;
-  P.hp--;
-  Snd.play('hurt');
-  FX.flash(0.5); FX.shake = 0.5;
-  if (P.hp <= 0) { killPlayer(); return; }
-  P.x = P.safe.x; P.y = P.safe.y + 0.05; P.vx = 0; P.vy = 0; P.inv = 2;
-  FX.emit(P.x, P.y + 0.4, 12, { colors: [0xffffff, 0x6fe7ff], speed: 5, life: 0.5, gravity: 0 });
-  popupAtPlayer('OOPS', '#ff8bd7');
-}
-
-function killPlayer() {
-  P.dead = true; P.deadT = 0; P.hp = 0;
-  G.deaths++;
-  P.mesh.visible = false;
-  Snd.play('die');
-  FX.shake = 0.9;
-  FX.emit(P.x, P.y + 0.5, 34, { colors: [0xff9d3c, 0xffffff, 0xff4f78, 0x3be0c8], speed: 9, life: 1, size: 0.24 });
-}
-
-function respawn() {
-  const cp = G.checkpoint;
-  resetPlayer(cp.x, cp.y);
-  P.hp = P.maxHp; P.inv = 2;
-  if (Wd.boss && G.bossActive) resetBoss();
-  G.respawnT = 0;
-  snapCamera();
-  FX.emit(P.x, P.y + 0.5, 16, { colors: [0xffffff, 0x6fe7ff, 0xffd23f], speed: 6, life: 0.6, gravity: 0 });
-}
-
-function popupAtPlayer(txt, color) { FX.popup(P.x, P.y + 1.4, txt, color); }
-
-/* ---------------------------------------------------------------------
-   12. PLATFORMS, ENEMIES, SHOTS, BOSS
-   --------------------------------------------------------------------- */
-function updatePlatforms(dt) {
-  for (const p of Wd.platforms) {
-    p.prevTop = p.top; p.dx = 0; p.dy = 0;
-    p.t += dt;
-    if (p.kind === 'h') {
-      const nx = p.x0 + Math.sin(p.t * 1.05) * 2.4;
-      p.dx = nx - p.x; p.x = nx;
-    } else if (p.kind === 'v') {
-      const nt = p.top0 + (1 - Math.cos(p.t * 0.95)) / 2 * 5.0;
-      p.dy = nt - p.top; p.top = nt;
-    } else if (p.kind === 'crumble') {
-      if (p.state === 'shake') {
-        p.timer -= dt;
-        if (p.timer <= 0) {
-          p.state = 'fall'; p.solid = false; p.vy = 0;
-          Snd.play('crumble');
-          FX.emit(p.x, p.top, 12, { colors: [0xb98a5e, 0x7a5636, 0xf0cfa2], speed: 3, life: 0.7 });
-        }
-      } else if (p.state === 'fall') {
-        p.vy -= 32 * dt; p.top += p.vy * dt;
-        if (p.top < -3) { p.state = 'gone'; p.timer = 2.6; p.meshes.forEach((m) => { m.visible = false; }); }
-      } else if (p.state === 'gone') {
-        p.timer -= dt;
-        if (p.timer <= 0) {
-          p.state = 'idle'; p.solid = true; p.top = p.home.top; p.prevTop = p.top;
-          p.meshes.forEach((m) => { m.visible = true; });
-        }
-      }
-    }
-    positionPlatform(p);
-    if (p.state === 'shake') p.meshes.forEach((m) => { m.position.x += (Math.random() - 0.5) * 0.08; m.position.y += (Math.random() - 0.5) * 0.06; });
-  }
-}
-
-function shoot(x, y, vx, vy, opts = {}) {
-  const mesh = makeSprite(opts.purple ? Art.S.orbPurple : Art.S.orbRed, opts.size || 0.6, opts.size || 0.6, 0.35);
-  mesh.position.set(x, y, 0.35);
-  Wd.shots.push({ x, y, vx, vy, g: opts.g || 0, life: opts.life || 6, r: (opts.size || 0.6) * 0.36, mesh, purple: !!opts.purple });
-}
-
-function killEnemy(e, byDash) {
-  e.alive = false;
-  e.mesh.visible = false;
-  G.kills++; G.score += 150;
-  Snd.play('stomp');
-  FX.emit(e.x, e.y + e.h / 2, 16, { colors: e.kind === 'slime' ? [0x6be36a, 0xc4ffbd, 0x38a04a] : [0x8a4fd8, 0xff4060, 0xffffff], speed: 7, life: 0.7 });
-  FX.popup(e.x, e.y + 1, '+150', '#ffffff');
-  if (byDash) FX.shake = Math.max(FX.shake, 0.3);
-}
-
-function updateEnemies(dt) {
-  for (const e of Wd.enemies) {
-    if (!e.alive) continue;
-    e.t += dt;
-    switch (e.kind) {
-      case 'slime': {
-        e.vy = Math.max(e.vy - 55 * dt, -25);
-        e.vx = e.dir * 1.9;
-        moveBody(e, dt, false);
-        if (e.hitX !== 0) e.dir = -e.dir;
-        else if (e.onGround) {
-          const tx = Math.floor(e.x + e.dir * (e.w / 2 + 0.12)), ty = Math.floor(e.y - 0.1);
-          const t = tileAt(tx, ty);
-          if (!isSolid(t) && t !== 2) e.dir = -e.dir;
-          else if (tileAt(tx, Math.floor(e.y + 0.1)) === 3) e.dir = -e.dir;
-        }
+      case EV_LAND:
+        Snd.play('land'); squash(1.3, 0.72);
+        FX.emit(x, y, 6, { colors: [0xffffff, 0xcfc4ee], angle: 0, spread: Math.PI, speed: 3.5, life: 0.35, gravity: 2 });
         break;
-      }
-      case 'bat': {
-        const near = Math.abs(P.x - e.ox) < 8;
-        if (near && !P.dead) e.ox += sign(P.x - e.ox) * 0.9 * dt;
-        const px = e.x;
-        e.x = e.ox + Math.sin(e.t * 1.3) * 3.2;
-        e.y = e.oy + Math.sin(e.t * 2.4) * 0.6;
-        e.dir = sign(e.x - px) || e.dir;
+      case EV_DASH:
+        Snd.play('dash');
+        FX.emit(x, y, 8, { colors: [0x6fe7ff, 0xffffff], angle: a > 0 ? Math.PI : 0, spread: 0.5, speed: 6, gravity: 0, life: 0.35 });
         break;
-      }
-      case 'saw': {
-        e.x += e.vx * dt;
-        const ahead = Math.floor(e.x + sign(e.vx) * 0.5);
-        const floorAhead = tileAt(ahead, Math.floor(e.y - 0.2));
-        if (isSolid(tileAt(ahead, Math.floor(e.y + 0.4))) || (!isSolid(floorAhead) && floorAhead !== 2) || Math.abs(e.x - e.ox) > 3) {
-          e.vx = -e.vx; e.x += e.vx * dt * 2;
-        }
-        e.mesh.rotation.z -= sign(e.vx) * dt * 9;
-        break;
-      }
-      case 'turret': {
-        e.dir = sign(P.x - e.x) || 1;
-        e.cd -= dt;
-        const dx = Math.abs(P.x - e.x), dy = Math.abs(P.y - e.y);
-        if (e.cd <= 0 && dx < Math.min(13, view.w / 2 + 1) && dy < 7 && !P.dead) {
-          e.cd = 2.2;
-          shoot(e.x + e.dir * 0.6, e.y + 0.5, e.dir * 6.5, 0);
-          Snd.play('shoot');
-          FX.emit(e.x + e.dir * 0.7, e.y + 0.5, 4, { colors: [0xffd23f, 0xff7a3d], angle: e.dir > 0 ? 0 : Math.PI, spread: 0.6, speed: 4, life: 0.25, gravity: 0 });
-        }
-        break;
-      }
-      case 'boss': updateBoss(e, dt); break;
-    }
-  }
-}
-
-function updateShots(dt) {
-  for (let i = Wd.shots.length - 1; i >= 0; i--) {
-    const s = Wd.shots[i];
-    s.life -= dt;
-    s.vy -= s.g * dt;
-    s.x += s.vx * dt; s.y += s.vy * dt;
-    let dead = s.life <= 0 || s.y < -3;
-    if (!dead && isSolid(tileAt(Math.floor(s.x), Math.floor(s.y)))) {
-      dead = true;
-      FX.emit(s.x, s.y, 6, { colors: s.purple ? [0xe58bff, 0xffffff] : [0xff7a3d, 0xffd23f], speed: 4, life: 0.35 });
-    }
-    if (!dead && !P.dead && Math.abs(P.x - s.x) < P.w / 2 + s.r && s.y > P.y - s.r && s.y < P.y + P.h + s.r) {
-      if (hurtPlayer(s.x)) dead = true;
-      else if (P.dashT > 0) { /* phase through while dashing */ }
-    }
-    if (dead) {
-      killMesh(s.mesh); Wd.shots.splice(i, 1);
-    }
-  }
-}
-
-/* ---- boss: The Great Blob ---- */
-function startBoss() {
-  const b = Wd.boss, spec = Wd.L.bossSpec;
-  G.bossActive = true;
-  setDoor(true);
-  Snd.play('door');
-  FX.shake = 0.8;
-  b.x = spec.x; b.y = LEVEL_H + 1; b.vx = 0; b.vy = 0;
-  b.state = 'intro'; b.hp = b.hp0; b.inv = 0; b.alive = true;
-  b.mesh.visible = true;
-  $('bossbar').style.display = 'block';
-  updateBossBar();
-}
-
-function resetBoss() {
-  const b = Wd.boss;
-  G.bossActive = false;
-  b.state = 'sleep'; b.hp = b.hp0; b.alive = true; b.mesh.visible = false; b.inv = 0;
-  setDoor(false);
-  $('bossbar').style.display = 'none';
-  for (const s of Wd.shots) killMesh(s.mesh);
-  Wd.shots = [];
-}
-
-function updateBossBar() {
-  const b = Wd.boss;
-  if (b) $('bossFill').style.width = Math.max(0, b.hp / b.hp0 * 100) + '%';
-}
-
-function damageBoss() {
-  const b = Wd.boss;
-  if (b.inv > 0 || b.state === 'intro' || b.state === 'dying') return false;
-  b.hp--; b.inv = 1.1;
-  Snd.play('bossHit');
-  G.freeze = 0.1; FX.shake = 0.8; FX.flash(0.5);
-  FX.emit(b.x, b.y + 1.2, 22, { colors: [0xe58bff, 0xffffff, 0xb04fe8], speed: 9, life: 0.8, size: 0.26 });
-  FX.popup(b.x, b.y + 3, b.hp > 0 ? 'HP ' + b.hp : 'K.O.!', '#ff8bd7');
-  updateBossBar();
-  if (b.hp <= 0) {
-    b.state = 'dying'; b.st = 1.8; b.vx = 0;
-    for (const s of Wd.shots) { FX.emit(s.x, s.y, 5, { colors: [0xffffff, 0xe58bff], speed: 4 }); killMesh(s.mesh); }
-    Wd.shots = [];
-  }
-  return true;
-}
-
-function updateBoss(b, dt) {
-  if (b.state === 'sleep') return;
-  b.inv = Math.max(0, b.inv - dt);
-  b.st -= dt;
-  const dx = P.x - b.x;
-  const lowHp = b.hp <= 3;
-  switch (b.state) {
-    case 'intro':
-      b.vy = Math.max(b.vy - 60 * dt, -30);
-      moveBody(b, dt, false);
-      if (b.onGround) {
-        b.state = 'idle'; b.st = 1.0;
-        Snd.play('boom'); FX.shake = 1;
-        FX.emit(b.x, b.y, 24, { colors: [0xcfc4ee, 0xffffff], angle: 0, spread: Math.PI, speed: 8, life: 0.6, gravity: 3 });
-      }
-      break;
-    case 'idle':
-      b.dir = sign(dx) || 1;
-      b.vx = 0; b.vy = -2;
-      moveBody(b, dt, false);
-      if (b.st <= 0) {
-        const r = Math.random();
-        if (r < 0.5) { b.state = 'jump'; b.vy = 25; b.vx = clamp(dx / 1.2, -11, 11); Snd.play('spring'); }
-        else if (r < 0.8) { b.state = 'shoot'; b.st = 0.5; b.shots = lowHp ? 5 : 3; }
-        else { b.state = 'charge'; b.st = 1.3; b.dir = sign(dx) || 1; }
-      }
-      break;
-    case 'jump':
-      b.vy = Math.max(b.vy - 62 * dt, -30);
-      moveBody(b, dt, false);
-      if (b.hitX) b.vx = 0;
-      if (b.onGround) {
-        b.state = 'recover'; b.st = lowHp ? 0.8 : 1.2; b.vx = 0;
-        Snd.play('boom'); FX.shake = 1;
-        FX.emit(b.x, b.y, 20, { colors: [0xcfc4ee, 0xffffff], angle: 0, spread: Math.PI, speed: 8, life: 0.5, gravity: 3 });
-        shoot(b.x - 1.3, b.y + 0.35, -7, 0, { purple: true, size: 0.7, life: 4 });
-        shoot(b.x + 1.3, b.y + 0.35, 7, 0, { purple: true, size: 0.7, life: 4 });
-      }
-      break;
-    case 'recover':
-      b.vx = 0; b.vy = -2;
-      moveBody(b, dt, false);
-      if (b.st <= 0) { b.state = 'idle'; b.st = lowHp ? 0.35 : 0.7; }
-      break;
-    case 'shoot':
-      b.vx = 0; b.vy = -2; moveBody(b, dt, false);
-      b.dir = sign(dx) || 1;
-      if (b.st <= 0 && b.shots > 0) {
-        const ang = Math.atan2(P.y + 0.4 - (b.y + 1.4), P.x - b.x) + (Math.random() - 0.5) * 0.35;
-        shoot(b.x + b.dir * 1.1, b.y + 1.4, Math.cos(ang) * 7.5, Math.sin(ang) * 7.5, { purple: true, size: 0.6, life: 5 });
-        Snd.play('shoot');
-        b.shots--; b.st = 0.3;
-      } else if (b.shots <= 0 && b.st <= 0) { b.state = 'idle'; b.st = 0.7; }
-      break;
-    case 'charge':
-      b.vy = Math.max(b.vy - 60 * dt, -30);
-      if (b.st > 0.75) b.vx = 0; // telegraph
-      else b.vx = b.dir * (lowHp ? 15 : 12);
-      moveBody(b, dt, false);
-      if (b.st <= 0.75 && b.hitX) {
-        b.state = 'recover'; b.st = 1.3; b.vx = 0;
-        Snd.play('boom'); FX.shake = 1;
-        FX.emit(b.x + b.dir * 1.2, b.y + 1, 18, { colors: [0xcfc4ee, 0xffffff], speed: 8, life: 0.5 });
-      } else if (b.st <= 0) { b.state = 'recover'; b.st = 0.8; b.vx = 0; }
-      break;
-    case 'dying':
-      b.vx = 0;
-      if (Math.random() < 0.5) FX.emit(b.x + rndRange(-1.2, 1.2), b.y + rndRange(0, 2.4), 6, { colors: [0xffd23f, 0xff7a3d, 0xffffff, 0xe58bff], speed: 7, life: 0.6, size: 0.3 });
-      FX.shake = Math.max(FX.shake, 0.5);
-      if (b.st <= 0) {
-        b.alive = false; b.mesh.visible = false;
-        Snd.play('boom'); FX.flash(1); FX.shake = 1.2;
-        FX.emit(b.x, b.y + 1.2, 60, { colors: [0xffd23f, 0xff7a3d, 0xffffff, 0xe58bff, 0x6fe7ff], speed: 12, life: 1.2, size: 0.34 });
-        G.score += 3000; G.bossKilled = true; G.bossActive = false;
-        $('bossbar').style.display = 'none';
-        setDoor(false);
-        addGoal(b.x, 2);
-        FX.popup(b.x, b.y + 3, 'BOSS DEFEATED!', '#ffd23f');
-      }
-      break;
-  }
-}
-
-/* ---------------------------------------------------------------------
-   13. INTERACTIONS: enemies, items, springs, checkpoints, goal
-   --------------------------------------------------------------------- */
-function stompBounce(strong) {
-  P.vy = Input.held.jump ? PLAYER.stompBounce + 3.5 : PLAYER.stompBounce;
-  if (strong) P.vy += 2;
-  P.jumpsLeft = 1; P.airDashUsed = false; P.onGround = false; P.dashT = 0;
-  P.sx = 0.8; P.sy = 1.25;
-}
-
-function updateInteractions(dt) {
-  if (P.dead) return;
-  // enemies
-  for (const e of Wd.enemies) {
-    if (!e.alive || (e.kind === 'boss' && (e.state === 'sleep' || e.state === 'dying'))) continue;
-    if (!boxHit(P, e)) continue;
-    if (e.kind === 'boss') {
-      if (P.vy < 0 && P.prevY >= e.y + e.h * 0.55 && P.dashT <= 0) {
-        if (damageBoss()) stompBounce(true);
-        else P.vy = Math.max(P.vy, 8);
-      } else hurtPlayer(e.x);
-    } else if (!e.stomp) {
-      hurtPlayer(e.x);
-    } else if (P.dashT > 0) {
-      killEnemy(e, true);
-    } else if (P.vy < 0 && P.prevY >= e.y + e.h * 0.5) {
-      killEnemy(e, false);
-      stompBounce(false);
-      G.freeze = 0.04;
-    } else hurtPlayer(e.x);
-  }
-
-  // coins & pickups
-  for (const c of Wd.coins) {
-    if (c.got) continue;
-    if (Math.abs(P.x - c.x) < c.r + P.w / 2 && Math.abs(P.y + 0.45 - c.y) < c.r + 0.45) {
-      if (c.kind === 'heart') {
-        if (P.hp >= P.maxHp) { G.score += 250; FX.popup(c.x, c.y + 0.5, '+250', '#ff8bd7'); }
-        else { P.hp++; FX.popup(c.x, c.y + 0.5, '+1 HP', '#ff8bd7'); }
-        Snd.play('heart');
-        FX.emit(c.x, c.y, 12, { colors: [0xff4f78, 0xffc0d0], speed: 5, life: 0.6, gravity: 0 });
-      } else if (c.kind === 'gem') {
-        G.coins += 5; G.score += 500;
-        Snd.play('gem');
-        FX.popup(c.x, c.y + 0.5, '+5', '#6fe7ff');
-        FX.emit(c.x, c.y, 16, { colors: [0x3fd4ff, 0xb8f4ff, 0xffffff], speed: 6, life: 0.6, gravity: 0 });
-      } else {
-        G.coins++; G.score += 100;
+      case EV_COIN:
         Snd.play('coin');
-        FX.emit(c.x, c.y, 6, { colors: [0xffd23f, 0xfff2a8], speed: 4, life: 0.4, gravity: 0 });
+        FX.emit(x, y, 6, { colors: [0xffd23f, 0xfff2a8], speed: 4, life: 0.4, gravity: 0 });
+        break;
+      case EV_GEM:
+        Snd.play('gem'); FX.popup(x, y + 0.5, '+5', '#6fe7ff');
+        FX.emit(x, y, 16, { colors: [0x3fd4ff, 0xb8f4ff, 0xffffff], speed: 6, life: 0.6, gravity: 0 });
+        break;
+      case EV_HEART:
+        Snd.play('heart'); FX.popup(x, y + 0.5, a ? '+1 HP' : '+250', '#ff8bd7');
+        FX.emit(x, y, 12, { colors: [0xff4f78, 0xffc0d0], speed: 5, life: 0.6, gravity: 0 });
+        break;
+      case EV_KILL: {
+        const dash = a >= 10, kind = a - (dash ? 10 : 0);
+        Snd.play('stomp'); FX.popup(x, y + 0.5, '+150', '#ffffff');
+        FX.emit(x, y, 16, { colors: kind === EK_SLIME ? [0x6be36a, 0xc4ffbd, 0x38a04a] : [0x8a4fd8, 0xff4060, 0xffffff], speed: 7, life: 0.7 });
+        if (dash) FX.shake = Math.max(FX.shake, 0.3); else squash(0.8, 1.25);
+        break;
       }
-      c.got = true; c.mesh.visible = false;
+      case EV_HURT:
+        Snd.play('hurt'); FX.shake = 0.55; FX.flash(0.55);
+        FX.emit(x, y, 14, { colors: [0xff4f78, 0xffffff, 0xffd23f], speed: 7, life: 0.6 });
+        break;
+      case EV_DIE:
+        Snd.play('die'); FX.shake = 0.9;
+        FX.emit(x, y, 34, { colors: [0xff9d3c, 0xffffff, 0xff4f78, 0x3be0c8], speed: 9, life: 1, size: 0.24 });
+        break;
+      case EV_SPRING:
+        Snd.play('spring');
+        if (!a) { squash(0.7, 1.4); FX.emit(x, y, 10, { colors: [0xff5d8f, 0xffffff], angle: Math.PI / 2, spread: 0.9, speed: 6, life: 0.4 }); }
+        break;
+      case EV_SHOOT:
+        Snd.play('shoot');
+        FX.emit(x, y, 4, { colors: [0xffd23f, 0xff7a3d], angle: a > 0 ? 0 : Math.PI, spread: 0.6, speed: 4, life: 0.25, gravity: 0 });
+        break;
+      case EV_CHECK:
+        Snd.play('check'); FX.popup(x, y + 2.4, 'CHECKPOINT', '#5be37d');
+        FX.emit(x, y + 1.4, 20, { colors: [0x5be37d, 0xffffff, 0xffd23f], speed: 6, life: 0.7 });
+        break;
+      case EV_CRUMBLE:
+        Snd.play('crumble');
+        FX.emit(x, y, 12, { colors: [0xb98a5e, 0x7a5636, 0xf0cfa2], speed: 3, life: 0.7 });
+        break;
+      case EV_BOOM:
+        Snd.play('boom'); FX.shake = 1;
+        if (a === 2) FX.emit(x, y + 1, 18, { colors: [0xcfc4ee, 0xffffff], speed: 8, life: 0.5 });
+        else FX.emit(x, y, a === 1 ? 24 : 20, { colors: [0xcfc4ee, 0xffffff], angle: 0, spread: Math.PI, speed: 8, life: 0.55, gravity: 3 });
+        break;
+      case EV_BOSSHIT:
+        Snd.play('bossHit'); FX.shake = 0.8; FX.flash(0.5); squash(0.8, 1.25);
+        FX.emit(x, y + 1.2, 22, { colors: [0xe58bff, 0xffffff, 0xb04fe8], speed: 9, life: 0.8, size: 0.26 });
+        FX.popup(x, y + 3, a > 0 ? 'HP ' + a : 'K.O.!', '#ff8bd7');
+        break;
+      case EV_DOOR:
+        Snd.play('door'); if (a) FX.shake = 0.8;
+        break;
+      case EV_PIT:
+        Snd.play('hurt'); FX.flash(0.5); FX.shake = 0.5;
+        break;
+      case EV_RESPAWN:
+        FX.emit(x, y, 16, { colors: [0xffffff, 0x6fe7ff, 0xffd23f], speed: 6, life: 0.6, gravity: 0 });
+        if (a === 1) FX.popup(x, y + 1, 'OOPS', '#ff8bd7'); else snapCamera();
+        break;
+      case EV_COMPLETE:
+        completeLevel();
+        break;
+      case EV_BOSSDEAD:
+        Snd.play('boom'); FX.flash(1); FX.shake = 1.2;
+        FX.emit(x, y + 1.2, 60, { colors: [0xffd23f, 0xff7a3d, 0xffffff, 0xe58bff, 0x6fe7ff], speed: 12, life: 1.2, size: 0.34 });
+        FX.popup(x, y + 3, 'BOSS DEFEATED!', '#ffd23f');
+        break;
+      case EV_SHOTHIT:
+        FX.emit(x, y, 6, { colors: a ? [0xe58bff, 0xffffff] : [0xff7a3d, 0xffd23f], speed: 4, life: 0.35 });
+        break;
+      case EV_BOSSEXPLODE:
+        FX.emit(x, y, 6, { colors: [0xffd23f, 0xff7a3d, 0xffffff, 0xe58bff], speed: 7, life: 0.6, size: 0.3 });
+        FX.shake = Math.max(FX.shake, 0.5);
+        break;
+      default: break;
     }
   }
-
-  // springs
-  for (const s of Wd.springs) {
-    if (Math.abs(P.x - s.x) < 0.7 && P.y >= s.y - 0.1 && P.y < s.y + 0.55 && P.vy <= 0.5) {
-      P.vy = 31; P.onGround = false; P.jumpsLeft = 1; P.airDashUsed = false; P.dashT = 0; P.coyote = 0;
-      P.sx = 0.7; P.sy = 1.4;
-      s.t = 0.3;
-      Snd.play('spring');
-      FX.emit(s.x, s.y + 0.4, 10, { colors: [0xff5d8f, 0xffffff], angle: Math.PI / 2, spread: 0.9, speed: 6, life: 0.4 });
-    }
-  }
-
-  // checkpoints
-  for (const c of Wd.checks) {
-    if (!c.on && Math.abs(P.x - c.x) < 1.3 && Math.abs(P.y - c.y) < 2) {
-      Wd.checks.forEach((o) => { o.on = false; });
-      c.on = true;
-      G.checkpoint = { x: c.x, y: c.y };
-      Snd.play('check');
-      FX.popup(c.x, c.y + 2.4, 'CHECKPOINT', '#5be37d');
-      FX.emit(c.x, c.y + 1.4, 20, { colors: [0x5be37d, 0xffffff, 0xffd23f], speed: 6, life: 0.7 });
-    }
-  }
-
-  // boss trigger
-  if (Wd.boss && Wd.boss.state === 'sleep' && Wd.boss.alive && P.x > Wd.L.bossSpec.trigger) startBoss();
-
-  // goal
-  if (Wd.goal && Math.abs(P.x - Wd.goal.x) < 0.9 && Math.abs(P.y + 0.5 - (Wd.goal.y + 1.1)) < 1.5) completeLevel();
 }
 
 /* ---------------------------------------------------------------------
-   14. LEVEL FLOW
+   12. LEVEL FLOW
    --------------------------------------------------------------------- */
 let levelMesh = null;
 
@@ -2065,20 +1564,16 @@ function loadLevel(i, attract) {
   clearWorld();
   FX.clear();
   const L = buildLevel(i);
-  Wd.L = L; Wd.w = L.w; Wd.tiles = L.tiles; Wd.coinsTotal = 0;
-  G.lvl = i;
+  Wd.L = L; Wd.w = L.w; G.lvl = i;
   buildBackground(L.def.theme);
   resize();
   levelMesh = buildLevelMesh(L);
-  spawnSpecs(L);
-  if (!P.mesh || !P.mesh.parent) {
-    P.mesh = makeSprite(Art.S.hero.idle, 1, 1, 0.5);
-  }
-  Object.assign(G, { time: 0, coins: 0, kills: 0, deaths: 0, score: 0, bossKilled: false, bossActive: false, freeze: 0, respawnT: 0 });
-  G.checkpoint = { x: L.spawn.x, y: L.spawn.y };
-  P.hp = P.maxHp;
-  resetPlayer(L.spawn.x, L.spawn.y);
-  if (attract) { P.dead = true; P.mesh.visible = false; }
+  simLoad(L, attract);
+  buildEntities(L);
+  ensureGoal();
+  Pv.mesh = makeSprite(Art.S.hero.idle, 1, 1, 0.5);
+  Pv.sx = Pv.sy = 1;
+  Pv.mesh.visible = !attract;
   $('bossbar').style.display = 'none';
   snapCamera();
   Snd.startMusic(L.def.theme);
@@ -2092,18 +1587,17 @@ function startLevel(i) {
   hideScreen();
   $('hud').style.display = 'flex';
   $('hLevel').textContent = (i + 1) + '/' + LEVELS.length + ' ' + LEVELS[i].name.toUpperCase();
-  FX.popup(P.x, P.y + 2.6, LEVELS[i].name.toUpperCase(), '#ffd23f');
+  FX.popup(rd(P_X), rd(P_Y) + 2.6, LEVELS[i].name.toUpperCase(), '#ffd23f');
 }
 
 function completeLevel() {
   if (G.state !== 'play') return;
   G.state = 'clearing';
   G.clearT = 1.5;
-  P.vx = 0;
   Snd.play('win');
   FX.flash(0.6);
   for (let k = 0; k < 4; k++) {
-    FX.emit(P.x + rndRange(-2, 2), P.y + 2.5, 20, { colors: [0xffd23f, 0xff5d8f, 0x6fe7ff, 0x5be37d, 0xffffff], angle: Math.PI / 2, spread: 1.4, speed: 10, life: 1.4, size: 0.2, gravity: 10 });
+    FX.emit(rd(P_X) + rndRange(-2, 2), rd(P_Y) + 2.5, 20, { colors: [0xffd23f, 0xff5d8f, 0x6fe7ff, 0x5be37d, 0xffffff], angle: Math.PI / 2, spread: 1.4, speed: 10, life: 1.4, size: 0.2, gravity: 10 });
   }
   $('bossbar').style.display = 'none';
 }
@@ -2112,27 +1606,28 @@ function rankFor(pts) { return pts >= 85 ? 'S' : pts >= 68 ? 'A' : pts >= 50 ? '
 
 function showClear() {
   G.state = 'clear';
+  const time = rd(G_TIME), coins = rd(G_COINS), total0 = rd(G_COINSTOTAL), deaths = rd(G_DEATHS), kills = rd(G_KILLS);
   const par = Wd.w * 0.3;
-  const timeBonus = Math.max(0, Math.floor(par * 2 - G.time)) * 10;
-  const total = Math.max(0, G.score + timeBonus - G.deaths * 200);
-  const coinPct = G.coins / Math.max(1, Wd.coinsTotal);
-  const timeScore = clamp((par * 1.8 - G.time) / (par * 0.8), 0, 1);
-  const pts = coinPct * 55 + timeScore * 30 + (G.deaths === 0 ? 15 : G.deaths < 3 ? 7 : 0);
+  const timeBonus = Math.max(0, Math.floor(par * 2 - time)) * 10;
+  const total = Math.max(0, rd(G_SCORE) + timeBonus - deaths * 200);
+  const coinPct = coins / Math.max(1, total0);
+  const timeScore = clamp((par * 1.8 - time) / (par * 0.8), 0, 1);
+  const pts = coinPct * 55 + timeScore * 30 + (deaths === 0 ? 15 : deaths < 3 ? 7 : 0);
   const rank = rankFor(pts);
   const best = store.get('best', {});
   const prev = best[G.lvl];
   const isBest = !prev || total > prev.score;
-  if (isBest) { best[G.lvl] = { score: total, time: G.time, rank }; store.set('best', best); }
+  if (isBest) { best[G.lvl] = { score: total, time, rank }; store.set('best', best); }
   const last = G.lvl >= LEVELS.length - 1;
   showScreen(`<div class="panel">
     <h2>${last ? 'YOU BEAT THE GREAT BLOB!' : 'LEVEL CLEAR!'}</h2>
-    <p class="sub">${LEVELS[G.lvl].name}</p>
+    <p class="sub">${LEVELS[G.lvl].name} &middot; simulated by ${simBe.name}</p>
     <div class="rank">${rank}</div>
     <div class="stats">
-      <span>TIME</span><span>${fmtTime(G.time)}</span>
-      <span>COINS</span><span>${G.coins} / ${Wd.coinsTotal}</span>
-      <span>SLOPS SQUASHED</span><span>${G.kills}</span>
-      <span>OOPSIES</span><span>${G.deaths}</span>
+      <span>TIME</span><span>${fmtTime(time)}</span>
+      <span>COINS</span><span>${coins} / ${total0}</span>
+      <span>SLOPS SQUASHED</span><span>${kills}</span>
+      <span>OOPSIES</span><span>${deaths}</span>
       <span>TIME BONUS</span><span>+${timeBonus}</span>
       <span>SCORE</span><span>${total}${isBest ? ' NEW BEST!' : ''}</span>
     </div>
@@ -2146,14 +1641,13 @@ function showClear() {
 }
 
 /* ---------------------------------------------------------------------
-   15. SCREENS
+   13. SCREENS  (title screen has the CORE dropdown)
    --------------------------------------------------------------------- */
 const ACTIONS = {
   next()   { startLevel(Math.min(G.lvl + 1, LEVELS.length - 1)); },
   retry()  { startLevel(G.lvl); },
   menu()   { showTitle(); },
   resume() { togglePause(); },
-  mute()   { toggleMute(); },
 };
 function showScreen(html) {
   const el = $('screen');
@@ -2167,35 +1661,69 @@ function showScreen(html) {
       else if (ACTIONS[a]) ACTIONS[a]();
     });
   });
-  const first = el.querySelector('button');
-  if (first) first.blur();
 }
 function hideScreen() { $('screen').classList.add('hidden'); }
+
+function coreInfoHtml(be) {
+  const kb = be.bytes ? (be.bytes / 1024).toFixed(be.bytes > 102400 ? 0 : 1) + ' KB wasm' : 'no wasm (plain JS)';
+  return `<b>${be.name}</b><br>${kb} &middot; ${be.note || ''}`;
+}
 
 function showTitle() {
   loadLevel(0, true);
   G.state = 'title';
   G.attractT = 0;
   $('hud').style.display = 'none';
+  $('bossbar').style.display = 'none';
   const best = store.get('best', {});
   const lvlBtns = LEVELS.map((l, i) => {
     const b = best[i];
-    return `<button class="pix" data-a="start:${i}">${i + 1}. ${l.name}${b ? ' [' + b.rank + ']' : ''}</button>`;
+    return `<button class="pix" data-a="start:${i}" data-lvl>${i + 1}. ${l.name}${b ? ' [' + b.rank + ']' : ''}</button>`;
   }).join('');
+  const opts = Backends.list.map((b) => `<option value="${b.id}"${b.id === simBe.id ? ' selected' : ''}>${b.name}</option>`).join('');
   showScreen(`<div class="panel">
     <h1>SLOP<br>RUNNER</h1>
-    <p class="sub">A 2D platformer proof of concept<br>one HTML file / three.js / zero assets</p>
+    <p class="sub">WASM EDITION<br>the whole game simulation runs in WebAssembly</p>
+    <div class="pick">
+      <label for="coreSel">SIMULATION CORE (language)</label>
+      <select id="coreSel">${opts}</select>
+      <div class="info" id="coreInfo">${coreInfoHtml(simBe)}</div>
+    </div>
     <div class="keys">
       <span><kbd>A</kbd><kbd>D</kbd> / <kbd>&larr;</kbd><kbd>&rarr;</kbd></span><span>Run</span>
-      <span><kbd>SPACE</kbd> / <kbd>W</kbd></span><span>Jump (press again in the air!)</span>
-      <span><kbd>SHIFT</kbd> / <kbd>X</kbd></span><span>Dash (kills slimes, dodges bullets)</span>
-      <span><kbd>S</kbd>+<kbd>JUMP</kbd></span><span>Drop through thin platforms</span>
+      <span><kbd>SPACE</kbd> / <kbd>W</kbd></span><span>Jump (again in the air!)</span>
+      <span><kbd>SHIFT</kbd> / <kbd>X</kbd></span><span>Dash</span>
+      <span><kbd>S</kbd>+<kbd>JUMP</kbd></span><span>Drop through platforms</span>
       <span><kbd>P</kbd> <kbd>R</kbd> <kbd>M</kbd></span><span>Pause / Restart / Mute</span>
     </div>
-    <p class="sub">Stomp enemies. Cling to walls and jump off them. Grab coins.</p>
     <div class="btns">${lvlBtns}</div>
     <p class="sub" style="margin-top:16px">Press ENTER to start level 1</p>
   </div>`);
+  $('coreSel').addEventListener('change', (e) => { selectCore(e.target.value); e.target.blur(); });
+}
+
+let coreSwitching = false;
+async function selectCore(id) {
+  if (coreSwitching) return;
+  coreSwitching = true;
+  const info = $('coreInfo'), sel = $('coreSel'), prev = simBe;
+  const setBtns = (off) => document.querySelectorAll('#screen [data-lvl]').forEach((b) => { b.disabled = off; });
+  setBtns(true);
+  if (info) { info.classList.remove('err'); info.innerHTML = 'Loading <b>' + id + '</b>...'; }
+  try {
+    const be = await Backends.get(id);
+    simBe = be;
+    store.set('core', id);
+    loadLevel(0, true);           // restart the attract-mode level on the new core
+    if ($('coreInfo')) $('coreInfo').innerHTML = coreInfoHtml(be);
+  } catch (err) {
+    console.error(err);
+    simBe = prev;
+    if (sel) sel.value = prev.id;
+    if ($('coreInfo')) { $('coreInfo').classList.add('err'); $('coreInfo').textContent = 'Could not load ' + id + ': ' + (err && err.message ? err.message : err); }
+  }
+  setBtns(false);
+  coreSwitching = false;
 }
 
 function togglePause() {
@@ -2229,16 +1757,16 @@ function handleKeys() {
   if (pr.mute) toggleMute();
   if (pr.pause) togglePause();
   if (pr.restart && (G.state === 'play' || G.state === 'clearing')) startLevel(G.lvl);
-  if (pr.confirm) {
+  if (pr.confirm && !coreSwitching) {
     if (G.state === 'title') startLevel(0);
     else if (G.state === 'clear') ACTIONS[G.lvl >= LEVELS.length - 1 ? 'menu' : 'next']();
   }
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden && G.state === 'play') togglePause(); });
-window.addEventListener('pointerdown', () => Snd.init(), { once: false });
+window.addEventListener('pointerdown', () => Snd.init());
 
 /* ---------------------------------------------------------------------
-   16. HUD
+   14. HUD
    --------------------------------------------------------------------- */
 const hudCache = {};
 function setHud(id, html) {
@@ -2246,24 +1774,33 @@ function setHud(id, html) {
 }
 function updateHud() {
   if (G.state === 'title' || G.state === 'boot') return;
+  const hp = rd(P_HP), maxHp = rd(P_MAXHP);
   let hearts = '';
-  for (let i = 0; i < P.maxHp; i++) hearts += i < P.hp ? '&#9829;' : '<span class="off">&#9829;</span>';
+  for (let i = 0; i < maxHp; i++) hearts += i < hp ? '&#9829;' : '<span class="off">&#9829;</span>';
   setHud('hHearts', hearts);
-  setHud('hCoins', '&#9679; ' + G.coins + ' / ' + Wd.coinsTotal);
-  setHud('hTime', fmtTime(G.time));
-  setHud('hScore', String(G.score).padStart(6, '0'));
-  const dashPct = P.airDashUsed ? 0 : clamp(1 - P.dashCd / PLAYER.dashCooldown, 0, 1) * 100;
-  const bar = $('hDash');
+  setHud('hCoins', '&#9679; ' + rd(G_COINS) + ' / ' + rd(G_COINSTOTAL));
+  setHud('hTime', fmtTime(rd(G_TIME)));
+  setHud('hScore', String(rd(G_SCORE)).padStart(6, '0'));
+  const dashPct = rd(P_AIRDASH) ? 0 : clamp(1 - rd(P_DASHCD) / PLAYER.dashCooldown, 0, 1) * 100;
   const w = dashPct.toFixed(0) + '%';
+  const bar = $('hDash');
   if (bar.style.width !== w) bar.style.width = w;
+  // boss bar
+  const bi = rd(G_BOSS);
+  if (bi >= 0) {
+    const active = rd(G_BOSSACTIVE) !== 0;
+    const bb = $('bossbar');
+    const want = active ? 'block' : 'none';
+    if (bb.style.display !== want) bb.style.display = want;
+    if (active) $('bossFill').style.width = Math.max(0, rd(EN_BASE + bi * EN_N + E_HP) / rd(EN_BASE + bi * EN_N + E_HP0) * 100) + '%';
+  }
 }
 
 /* ---------------------------------------------------------------------
-   17. VISUAL SYNC + CAMERA
+   15. VISUAL SYNC + CAMERA
    --------------------------------------------------------------------- */
 function snapCamera() {
-  const tx = P.x, ty = P.y + 1.5;
-  G.camX = tx; G.camY = ty;
+  G.camX = rd(P_X); G.camY = rd(P_Y) + 1.5;
   clampCamera();
 }
 function clampCamera() {
@@ -2278,8 +1815,8 @@ function updateCamera(dt) {
     const k = (1 - Math.cos(G.attractT * 0.06)) / 2;
     G.camX = lerp(view.w / 2, Wd.w - view.w / 2, k);
     G.camY = 7;
-  } else if (!P.dead || P.deadT < 0.5) {
-    const tx = P.x + P.face * 2.0, ty = P.y + 1.6;
+  } else if (!rd(P_DEAD) || rd(P_DEADT) < 0.5) {
+    const tx = rd(P_X) + rd(P_FACE) * 2.0, ty = rd(P_Y) + 1.6;
     const kx = 1 - Math.exp(-5 * dt), ky = 1 - Math.exp(-4 * dt);
     G.camX = lerp(G.camX, tx, kx);
     G.camY = lerp(G.camY, ty, ky);
@@ -2288,7 +1825,6 @@ function updateCamera(dt) {
   const s = FX.shake * FX.shake;
   cam.position.x = G.camX + (Math.random() - 0.5) * s * 0.9;
   cam.position.y = G.camY + (Math.random() - 0.5) * s * 0.9;
-  // parallax layers follow the camera
   for (const l of bgLayerMeshes) {
     l.mesh.position.x = cam.position.x;
     l.mesh.position.y = cam.position.y;
@@ -2297,119 +1833,141 @@ function updateCamera(dt) {
 }
 
 function syncMeshes(dt) {
-  const t = G.anim;
-  const S = Art.S;
+  const t = G.anim, S = Art.S;
 
   for (const c of Wd.coins) {
-    if (c.got) continue;
+    const got = rd(c.c + C_GOT) !== 0;
+    c.mesh.visible = !got;
+    if (got) continue;
     const bob = Math.sin(t * 3 + c.ph) * 0.07;
-    c.mesh.position.set(c.x, c.y + bob, 0.2);
-    if (c.kind === 'coin') setTex(c.mesh, S.coin[Math.floor(t * 8 + c.ph) % 4]);
+    c.mesh.position.set(rd(c.c + C_X), rd(c.c + C_Y) + bob, 0.2);
+    if (c.kind === SK_COIN) setTex(c.mesh, S.coin[Math.floor(t * 8 + c.ph) % 4]);
     else { const k = 1 + Math.sin(t * 5 + c.ph) * 0.08; c.mesh.scale.set(k, k, 1); }
   }
 
   for (const e of Wd.enemies) {
-    if (!e.alive) continue;
-    const m = e.mesh;
-    if (e.kind === 'slime') {
-      const sq = Math.sin(e.t * 7) * 0.07;
-      m.position.set(e.x, e.y + 0.5 - sq * 0.4, 0.3);
-      m.scale.set(e.dir * (1 + sq), 1 - sq, 1);
-    } else if (e.kind === 'bat') {
-      setTex(m, S.bat[Math.floor(e.t * 9) % 2]);
-      m.position.set(e.x, e.y + 0.05, 0.3);
-      m.scale.set(e.dir >= 0 ? 1 : -1, 1, 1);
-    } else if (e.kind === 'saw') {
-      m.position.set(e.x, e.y + 0.4, 0.3);
-    } else if (e.kind === 'turret') {
-      m.position.set(e.x, e.y + 0.4, 0.3);
-      m.scale.set(e.dir, 1, 1);
-    } else if (e.kind === 'boss') {
-      let sq = 0;
-      if (e.state === 'jump') sq = clamp(e.vy / 60, -0.25, 0.25) * 0.8;
-      else if (e.state === 'recover') sq = -0.12 * Math.min(1, e.st * 2);
-      else if (e.state === 'charge' && e.st > 0.75) sq = Math.sin(t * 60) * 0.05;
+    const b = e.b, m = e.mesh, alive = rd(b + E_ALIVE) !== 0;
+    if (e.kind === EK_BOSS) {
+      const st = rd(b + E_STATE);
+      m.visible = alive && st !== BS_SLEEP && (st !== BS_DYING || Math.floor(t * 30) % 2 === 0);
+    } else m.visible = alive;
+    if (!alive) continue;
+    const x = rd(b + B_X), y = rd(b + B_Y), dir = rd(b + E_DIR), et = rd(b + E_T);
+    if (e.kind === EK_SLIME) {
+      const sq = Math.sin(et * 7) * 0.07;
+      m.position.set(x, y + 0.5 - sq * 0.4, 0.3);
+      m.scale.set(dir * (1 + sq), 1 - sq, 1);
+    } else if (e.kind === EK_BAT) {
+      setTex(m, S.bat[Math.floor(et * 9) % 2]);
+      m.position.set(x, y + 0.05, 0.3);
+      m.scale.set(dir >= 0 ? 1 : -1, 1, 1);
+    } else if (e.kind === EK_SAW) {
+      m.position.set(x, y + 0.4, 0.3);
+      m.rotation.z -= Math.sign(rd(b + B_VX)) * dt * 9;
+    } else if (e.kind === EK_TURRET) {
+      m.position.set(x, y + 0.4, 0.3);
+      m.scale.set(dir, 1, 1);
+    } else {
+      const st = rd(b + E_STATE), est = rd(b + E_ST), inv = rd(b + E_INV);
+      let sq;
+      if (st === BS_JUMP) sq = clamp(rd(b + B_VY) / 60, -0.25, 0.25) * 0.8;
+      else if (st === BS_RECOVER) sq = -0.12 * Math.min(1, est * 2);
+      else if (st === BS_CHARGE && est > 0.75) sq = Math.sin(t * 60) * 0.05;
       else sq = Math.sin(t * 5) * 0.04;
-      m.position.set(e.x, e.y + 1.55 - sq * 1.2, 0.3);
-      m.scale.set(3.1 * (1 - sq) * (e.dir >= 0 ? 1 : -1), 3.1 * (1 + sq), 1);
-      const flashing = e.inv > 0 && Math.floor(t * 20) % 2 === 0;
-      m.material.color.setHex(flashing ? 0xff8888 : e.state === 'charge' && e.st > 0.75 ? 0xffb0b0 : 0xffffff);
-      if (e.state === 'dying') m.visible = Math.floor(t * 30) % 2 === 0;
+      m.position.set(x, y + 1.55 - sq * 1.2, 0.3);
+      m.scale.set(3.1 * (1 - sq) * (dir >= 0 ? 1 : -1), 3.1 * (1 + sq), 1);
+      const flashing = inv > 0 && Math.floor(t * 20) % 2 === 0;
+      m.material.color.setHex(flashing ? 0xff8888 : st === BS_CHARGE && est > 0.75 ? 0xffb0b0 : 0xffffff);
     }
   }
 
-  for (const s of Wd.shots) {
-    s.mesh.position.set(s.x, s.y, 0.35);
-    const k = 1 + Math.sin(t * 25) * 0.12;
-    s.mesh.scale.set((s.purple ? 0.7 : 0.6) * k, (s.purple ? 0.7 : 0.6) * k, 1);
+  // shots: pool of meshes mirrors the core's shot list
+  const ns = rd(G_NSH);
+  while (Wd.shots.length < ns) Wd.shots.push(makeSprite(S.orbRed, 0.6, 0.6, 0.35));
+  for (let i = 0; i < Wd.shots.length; i++) {
+    const m = Wd.shots[i];
+    if (i >= ns) { m.visible = false; continue; }
+    const s = SH_BASE + i * SH_N, purple = rd(s + S_PURPLE) !== 0, size = rd(s + S_SIZE);
+    setTex(m, purple ? S.orbPurple : S.orbRed);
+    const k = size * (1 + Math.sin(t * 25) * 0.12);
+    m.visible = true;
+    m.position.set(rd(s + S_X), rd(s + S_Y), 0.35);
+    m.scale.set(k, k, 1);
+  }
+
+  for (const p of Wd.plats) {
+    const state = rd(p.p + PT_STATE), x = rd(p.p + PT_X), top = rd(p.p + PT_TOP), n = p.meshes.length;
+    for (let i = 0; i < n; i++) {
+      const m = p.meshes[i];
+      m.visible = state !== CS_GONE;
+      m.position.set(x + (i - (n - 1) / 2), top - 0.5, 0.25);
+      if (state === CS_SHAKE) { m.position.x += (Math.random() - 0.5) * 0.08; m.position.y += (Math.random() - 0.5) * 0.06; }
+    }
   }
 
   for (const s of Wd.springs) {
-    s.t = Math.max(0, s.t - dt);
-    setTex(s.mesh, S.spring[s.t > 0 ? 1 : 0]);
-    s.mesh.position.set(s.x, s.y + 0.5, 0.2);
+    setTex(s.mesh, S.spring[rd(s.s + SP_T) > 0 ? 1 : 0]);
+    s.mesh.position.set(rd(s.s + SP_X), rd(s.s + SP_Y) + 0.5, 0.2);
   }
 
   for (const c of Wd.checks) {
     const f = Math.floor(t * 6 + c.t) % 4;
-    setTex(c.cloth, c.on ? S.flagOn[f] : S.flagOff[f]);
+    setTex(c.cloth, rd(c.c + CK_ON) ? S.flagOn[f] : S.flagOff[f]);
   }
 
+  for (let i = 0; i < Wd.doors.length; i++) Wd.doors[i].visible = rd(G_DOORCLOSED) !== 0;
+
+  ensureGoal();
   if (Wd.goal) {
-    Wd.goal.mesh.position.set(Wd.goal.x, Wd.goal.y + 1.1 + Math.sin(t * 2) * 0.05, 0.15);
+    const gx = rd(G_GOALX), gy = rd(G_GOALY);
+    Wd.goal.mesh.position.set(gx, gy + 1.1 + Math.sin(t * 2) * 0.05, 0.15);
     setTex(Wd.goal.mesh, S.portal[Math.floor(t * 12) % 6]);
-    if (Math.random() < 0.3) FX.emit(Wd.goal.x + rndRange(-0.6, 0.6), Wd.goal.y + rndRange(0.2, 2), 1, { colors: [0x6fe7ff, 0xff5d8f, 0xffffff], speed: 0.8, angle: Math.PI / 2, life: 0.9, gravity: -1, size: 0.14 });
+    if (Math.random() < 0.3) FX.emit(gx + rndRange(-0.6, 0.6), gy + rndRange(0.2, 2), 1, { colors: [0x6fe7ff, 0xff5d8f, 0xffffff], speed: 0.8, angle: Math.PI / 2, life: 0.9, gravity: -1, size: 0.14 });
   }
 
   // player sprite
-  if (P.mesh && !P.dead) {
-    let frame = 'idle';
-    if (P.dashT > 0) frame = 'runA';
-    else if (P.wallDir && !P.onGround && P.vy < 0) frame = 'wall';
-    else if (!P.onGround) frame = P.vy > 0 ? 'jump' : 'fall';
-    else if (Math.abs(P.vx) > 0.8) {
-      P.runT += dt * (6 + Math.abs(P.vx));
-      frame = Math.floor(P.runT / 3) % 2 ? 'runA' : 'runB';
-      if (Math.random() < 0.08) FX.emit(P.x - P.face * 0.2, P.y + 0.05, 1, { colors: [0xffffff, 0xcfc4ee], speed: 1, angle: Math.PI / 2, life: 0.3, gravity: 1, size: 0.12 });
+  const dead = rd(P_DEAD) !== 0;
+  if (Pv.mesh) {
+    if (dead) { Pv.mesh.visible = false; }
+    else {
+      const px = rd(P_X), py = rd(P_Y), vx = rd(P_VX), vy = rd(P_VY), gnd = rd(P_GND) !== 0;
+      const dashT = rd(P_DASHT), wallDir = rd(P_WALLDIR), face = rd(P_FACE), inv = rd(P_INV);
+      let frame = 'idle';
+      if (dashT > 0) frame = 'runA';
+      else if (wallDir && !gnd && vy < 0) frame = 'wall';
+      else if (!gnd) frame = vy > 0 ? 'jump' : 'fall';
+      else if (Math.abs(vx) > 0.8) {
+        Pv.runT += dt * (6 + Math.abs(vx));
+        frame = Math.floor(Pv.runT / 3) % 2 ? 'runA' : 'runB';
+        if (Math.random() < 0.08) FX.emit(px - face * 0.2, py + 0.05, 1, { colors: [0xffffff, 0xcfc4ee], speed: 1, angle: Math.PI / 2, life: 0.3, gravity: 1, size: 0.12 });
+      }
+      if (dashT > 0 && dt > 0) FX.emit(px, py + 0.45, 1, { colors: [0x6fe7ff, 0xb8f4ff], speed: 0.6, life: 0.35, size: 0.34, sizeMin: 0.28, gravity: 0 });
+      if (wallDir && !gnd && vy < -3 && Math.random() < 0.15) FX.emit(px + wallDir * 0.3, py + 0.5, 1, { colors: [0xffffff], speed: 1, life: 0.3, gravity: -1, size: 0.1 });
+      setTex(Pv.mesh, S.hero[frame]);
+      Pv.sx = lerp(Pv.sx, 1, 1 - Math.exp(-14 * dt));
+      Pv.sy = lerp(Pv.sy, 1, 1 - Math.exp(-14 * dt));
+      const bob = frame === 'idle' ? Math.sin(t * 3) * 0.015 : 0;
+      const dashStretch = dashT > 0 ? 1.25 : 1;
+      const wallFace = frame === 'wall' ? -wallDir : face;
+      Pv.mesh.scale.set(Pv.sx * dashStretch * (wallFace >= 0 ? 1 : -1), Pv.sy * (dashT > 0 ? 0.85 : 1), 1);
+      Pv.mesh.position.set(px, py + 0.44 + bob + (Pv.sy - 1) * 0.5, 0.5);
+      Pv.mesh.visible = inv > 0 ? Math.floor(t * 14) % 2 === 0 : true;
     }
-    setTex(P.mesh, S.hero[frame]);
-    P.sx = lerp(P.sx, 1, 1 - Math.exp(-14 * dt));
-    P.sy = lerp(P.sy, 1, 1 - Math.exp(-14 * dt));
-    const bob = frame === 'idle' ? Math.sin(t * 3) * 0.015 : 0;
-    const dashStretch = P.dashT > 0 ? 1.25 : 1;
-    const wallFace = frame === 'wall' ? -P.wallDir : P.face;
-    P.mesh.scale.set(P.sx * dashStretch * (wallFace >= 0 ? 1 : -1), P.sy * (P.dashT > 0 ? 0.85 : 1), 1);
-    P.mesh.position.set(P.x, P.y + 0.44 + bob + (P.sy - 1) * 0.5, 0.5);
-    P.mesh.visible = P.inv > 0 ? Math.floor(t * 14) % 2 === 0 : true;
-    if (P.inv > 1.2 && P.hp > 0) P.mesh.visible = Math.floor(t * 14) % 2 === 0;
   }
 }
 
 /* ---------------------------------------------------------------------
-   18. MAIN LOOP
+   16. MAIN LOOP
    --------------------------------------------------------------------- */
-function step(dt) {
-  if (G.freeze > 0) { G.freeze -= dt; return; }
-  if (G.state === 'title') {
-    updatePlatforms(dt); updateEnemies(dt); updateShots(dt);
-    return;
-  }
-  if (G.state === 'clearing') {
-    G.clearT -= dt;
-    updatePlatforms(dt); updateEnemies(dt); updateShots(dt);
-    if (G.clearT <= 0) showClear();
-    return;
-  }
-  G.time += dt;
-  updatePlatforms(dt);
-  if (!P.dead) updatePlayer(dt);
-  else { P.deadT += dt; if (P.deadT > 1.4) respawn(); }
-  updateEnemies(dt);
-  updateShots(dt);
-  updateInteractions(dt);
+function writeInput() {
+  wr(IN_AX, Input.axis);
+  wr(IN_JUMPHELD, Input.held.jump ? 1 : 0);
+  wr(IN_DOWNHELD, Input.held.down ? 1 : 0);
+  if (Input.pressed.jump) wr(IN_JUMPPRESS, 1);
+  if (Input.pressed.dash) wr(IN_DASHPRESS, 1);
 }
 
-let lastT = performance.now(), acc = 0;
+let lastT = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
   const rdt = Math.min(0.05, (now - lastT) / 1000);
@@ -2418,13 +1976,20 @@ function frame(now) {
   handleKeys();
   const running = G.state === 'play' || G.state === 'clearing' || G.state === 'title';
   if (running) {
-    acc += rdt;
-    let n = 0;
-    while (acc >= PHYS_DT && n < 12) { step(PHYS_DT); acc -= PHYS_DT; n++; }
-    if (n >= 12) acc = 0;
+    if (G.state !== 'title') writeInput();
+    const t0 = performance.now();
+    simBe.advance(rdt);
+    simM = simBe.view();
+    simStat.ms += performance.now() - t0; simStat.frames++;
+    processEvents();
+    if (G.state === 'clearing') { G.clearT -= rdt; if (G.clearT <= 0) showClear(); }
     G.anim += rdt;
     FX.update(rdt);
     syncMeshes(rdt);
+    if (simStat.frames >= 90) {
+      simStat.avg = simStat.ms / simStat.frames; simStat.ms = 0; simStat.frames = 0;
+      $('core-badge').textContent = 'CORE ' + simBe.id.toUpperCase() + '  ' + (simStat.avg * 1000).toFixed(0) + ' us/frame';
+    }
   }
   updateCamera(running ? rdt : 0);
   updateHud();
@@ -2433,15 +1998,19 @@ function frame(now) {
 }
 
 /* ---------------------------------------------------------------------
-   19. BOOT
+   17. BOOT
    --------------------------------------------------------------------- */
-(function boot() {
+(async function boot() {
   const errs = validateChunks();
   Art.build();
+  simBe = await Backends.get('js');
+  simM = simBe.view();
   resize();
   showTitle();
   requestAnimationFrame((t) => { lastT = t; frame(t); });
-  window.__slop = { G, P, Wd, LEVELS, loadLevel, startLevel, errs, CHUNKS, step, Input, tileAt, isSolid };
+  const want = new URLSearchParams(location.search).get('core') || store.get('core', 'js');
+  if (want !== 'js' && Backends.list.some((b) => b.id === want)) selectCore(want);
+  window.__slop = { G, Wd, LEVELS, loadLevel, startLevel, errs, rd, wr, selectCore, get be() { return simBe; } };
 })();
 </script>
 </body>

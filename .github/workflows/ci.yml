@@ -45,18 +45,25 @@ jobs:
           echo "$PWD/binaryen-version_119/bin" >> "$GITHUB_PATH"
       - run: opam install -y dune js_of_ocaml wasm_of_ocaml-compiler
       - run: python3 tools/abi.py
-      - name: build
+      - name: build OCaml core
         working-directory: core/ocaml
         run: opam exec -- dune build ./glue.bc.wasm.js --profile release
+      - name: build F* core (F* -> OCaml -> wasm)
+        run: |
+          curl -sL https://github.com/FStarLang/FStar/releases/download/v2026.09.27/fstar-v2026.09.27-Linux-x86_64.tar.gz -o fstar.tgz
+          mkdir -p $HOME/fst && tar xzf fstar.tgz -C $HOME/fst
+          FSTAR=$HOME/fst/fstar tools/build_fstar_wasm.sh
       - name: package
         run: |
-          mkdir -p out/ocaml
+          mkdir -p out/ocaml out/fstar
           cp core/ocaml/_build/default/glue.bc.wasm.js out/ocaml/
           cp -r core/ocaml/_build/default/glue.bc.wasm.assets out/ocaml/
+          cp core/fstar/wasm/_build/default/glue_fstar.bc.wasm.js out/fstar/
+          cp -r core/fstar/wasm/_build/default/glue_fstar.bc.wasm.assets out/fstar/
           find out -type f | xargs ls -l
-          head -c 1500 out/ocaml/glue.bc.wasm.js
+          head -c 1200 out/ocaml/glue.bc.wasm.js; echo
       - uses: actions/upload-artifact@v4
-        with: { name: wasm-ocaml, path: out/ocaml }
+        with: { name: wasm-ocaml, path: out }
 
   # ---------------------------------------------------------------- Haskell (GHC wasm backend)
   haskell:
@@ -81,34 +88,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: wasm-haskell, path: core/haskell/haskell.wasm }
 
-  # ---------------------------------------------------------------- F* (probe / build)
-  fstar:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: probe F* release
-        run: |
-          curl -sL https://api.github.com/repos/FStarLang/FStar/releases/latest -o rel.json
-          python3 - <<'PY'
-          import json
-          d = json.load(open('rel.json'))
-          print(d.get('tag_name'))
-          for a in d.get('assets', []): print(a['name'], a['browser_download_url'])
-          PY
-          URL=$(python3 -c "import json;d=json.load(open('rel.json'));print([a['browser_download_url'] for a in d['assets'] if 'Linux-x86_64' in a['name'] and a['name'].endswith('tar.gz')][0])")
-          echo "URL=$URL"
-          curl -sL "$URL" -o fstar.tgz && mkdir -p fstar-rel && tar xzf fstar.tgz -C fstar-rel
-          find fstar-rel -maxdepth 3 | head -60
-          find fstar-rel -iname '*float*' | head
-          find fstar-rel -name 'Prims.ml' -o -name 'FStar_Pervasives_Native.ml' | head
-      - name: extract probe
-        run: |
-          F=$(find fstar-rel -name fstar.exe | head -1)
-          echo "F=$F"; $F --version
-          cd core/fstar/probe
-          $F --lax --codegen OCaml --extract_module Test Prim.fst Test.fst || true
-          ls -la; cat Test.ml || true
-
   # ---------------------------------------------------------------- assemble + verify + deploy
   site:
     needs: [native, ocaml, haskell]
@@ -120,7 +99,7 @@ jobs:
         with: { name: wasm-native, path: wasm }
         continue-on-error: true
       - uses: actions/download-artifact@v4
-        with: { name: wasm-ocaml, path: wasm/ocaml }
+        with: { name: wasm-ocaml, path: wasm }
         continue-on-error: true
       - uses: actions/download-artifact@v4
         with: { name: wasm-haskell, path: wasm }

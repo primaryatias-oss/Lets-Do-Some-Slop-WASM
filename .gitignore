@@ -3,3 +3,12 @@ dist/
 wasm/
 node_modules/
 target/
+core/nim/build/
+core/fstar/out/
+core/fstar/_cache/
+core/fstar/wasm/
+core/ocaml/_build/
+core/haskell/haskell.wasm
+core/haskell/*.o
+core/haskell/*.hi
+core/haskell/*_stub.h

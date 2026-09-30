@@ -23,8 +23,10 @@ async function run(page, id, scen) {
     for (let f = 0; f < scen.frames; f++) {
       const px = rd(P_X), py = rd(P_Y), vy = rd(P_VY), gnd = rd(P_GND);
       let ax = 1, jump = 0, jumpHeld = 0, dash = 0, down = 0;
-      const solidAt = (dx, dy) => { const t = rd(TILE_BASE + Math.floor(py + dy) * rd(G_LW) + Math.floor(px + dx)); return t === 1 || t === 4; };
-      const groundAt = (dx) => { for (let d = 0; d < 3; d++) { const t = rd(TILE_BASE + Math.floor(py - 0.2 - d) * rd(G_LW) + Math.floor(px + dx)); if (t === 1 || t === 2) return true; } return false; };
+      const lw = rd(G_LW);
+      const tile = (tx, ty) => (ty < 0 || ty > 13 || tx < 0 || tx >= lw ? 0 : rd(TILE_BASE + ty * lw + tx));
+      const solidAt = (dx, dy) => { const t = tile(Math.floor(px + dx), Math.floor(py + dy)); return t === 1 || t === 4; };
+      const groundAt = (dx) => { for (let d = 0; d < 3; d++) { const t = tile(Math.floor(px + dx), Math.floor(py - 0.2 - d)); if (t === 1 || t === 2) return true; } return false; };
       if (scen.chase && rd(G_BOSS) >= 0) {
         const b = EN_BASE + rd(G_BOSS) * EN_N; const dx = rd(b + B_X) - px;
         ax = Math.abs(dx) > 0.6 ? Math.sign(dx) : 0;
@@ -59,7 +61,9 @@ async function run(page, id, scen) {
 }
 
 (async () => {
-  const b = await chromium.launch({ executablePath: process.env.CHROME || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=swiftshader', '--no-sandbox'] });
+  const launchOpts = { args: ['--use-gl=swiftshader', '--no-sandbox'] };
+  if (process.env.CHROME !== '') launchOpts.executablePath = process.env.CHROME || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+  const b = await chromium.launch(launchOpts);
   const page = await b.newPage({ viewport: { width: 800, height: 450 } });
   page.on('pageerror', (e) => console.log('PAGEERROR', e.message));
   await page.route('**/three.min.js', (r) => r.fulfill({ body: THREE, contentType: 'application/javascript' }));

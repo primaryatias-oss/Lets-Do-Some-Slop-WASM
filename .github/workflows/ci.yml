@@ -1,0 +1,126 @@
+name: build-and-deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------- C, Rust, Zig, Go, Nim
+  native:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.24' }
+      - name: toolchains
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q clang lld nim
+          rustup target add wasm32-unknown-unknown
+          pip install ziglang==0.13.0
+      - run: tools/build_native.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: wasm-native, path: wasm/*.wasm }
+
+  # ---------------------------------------------------------------- OCaml (wasm_of_ocaml)
+  ocaml:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ocaml/setup-ocaml@v3
+        with: { ocaml-compiler: '5.2' }
+      - name: binaryen
+        run: |
+          curl -sL https://github.com/WebAssembly/binaryen/releases/download/version_119/binaryen-version_119-x86_64-linux.tar.gz | tar xz
+          echo "$PWD/binaryen-version_119/bin" >> "$GITHUB_PATH"
+      - run: opam install -y dune js_of_ocaml wasm_of_ocaml-compiler
+      - run: python3 tools/abi.py
+      - name: build OCaml core
+        working-directory: core/ocaml
+        run: opam exec -- dune build ./glue.bc.wasm.js --profile release
+      - name: build F* core (F* -> OCaml -> wasm)
+        run: |
+          curl -sL https://github.com/FStarLang/FStar/releases/download/v2026.09.27/fstar-v2026.09.27-Linux-x86_64.tar.gz -o fstar.tgz
+          mkdir -p $HOME/fst && tar xzf fstar.tgz -C $HOME/fst
+          FSTAR=$HOME/fst/fstar tools/build_fstar_wasm.sh
+      - name: package
+        run: |
+          mkdir -p out/ocaml out/fstar
+          cp core/ocaml/_build/default/glue.bc.wasm.js out/ocaml/
+          cp -r core/ocaml/_build/default/glue.bc.wasm.assets out/ocaml/
+          cp core/fstar/wasm/_build/default/glue_fstar.bc.wasm.js out/fstar/
+          cp -r core/fstar/wasm/_build/default/glue_fstar.bc.wasm.assets out/fstar/
+          find out -type f | xargs ls -l
+          head -c 1200 out/ocaml/glue.bc.wasm.js; echo
+      - uses: actions/upload-artifact@v4
+        with: { name: wasm-ocaml, path: out }
+
+  # ---------------------------------------------------------------- Haskell (GHC wasm backend)
+  haskell:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: ghc-wasm-meta
+        run: |
+          curl -sSf https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta/-/raw/master/bootstrap.sh | FLAVOUR=9.10 sh
+          echo "$HOME/.ghc-wasm/bin" >> "$GITHUB_PATH"
+          ls ~/.ghc-wasm ~/.ghc-wasm/bin | head -40
+      - run: python3 tools/abi.py
+      - name: build
+        working-directory: core/haskell
+        run: |
+          . ~/.ghc-wasm/env
+          wasm32-wasi-ghc -O2 -no-hs-main -optl-mexec-model=reactor \
+            -optl-Wl,--export=hs_init -optl-Wl,--export=init -optl-Wl,--export=load_level -optl-Wl,--export=advance \
+            -optl-Wl,--export=mem_get -optl-Wl,--export=mem_set -optl-Wl,--export=mem_ptr \
+            Exports.hs Core.hs Abi.hs -o haskell.wasm
+          ls -l haskell.wasm
+      - uses: actions/upload-artifact@v4
+        with: { name: wasm-haskell, path: core/haskell/haskell.wasm }
+
+  # ---------------------------------------------------------------- assemble + verify + deploy
+  site:
+    needs: [native, ocaml, haskell]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: wasm-native, path: wasm }
+        continue-on-error: true
+      - uses: actions/download-artifact@v4
+        with: { name: wasm-ocaml, path: wasm }
+        continue-on-error: true
+      - uses: actions/download-artifact@v4
+        with: { name: wasm-haskell, path: wasm }
+        continue-on-error: true
+      - run: |
+          tools/dist.sh
+          find dist -type f | xargs ls -l | head -40
+      - name: differential test (headless Chromium)
+        continue-on-error: true
+        run: |
+          npm init -y >/dev/null
+          npm i playwright http-server three@0.128.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+          cp node_modules/three/build/three.min.js tools/three.min.js
+          (npx http-server dist -p 8765 -s -c-1 &) ; sleep 2
+          CHROME= PLAYWRIGHT_PATH=$PWD/node_modules/playwright node tools/difftest.js || true
+      - uses: actions/configure-pages@v5
+        if: github.ref == 'refs/heads/main'
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with: { path: dist }
+      - id: deployment
+        if: github.ref == 'refs/heads/main'
+        uses: actions/deploy-pages@v4

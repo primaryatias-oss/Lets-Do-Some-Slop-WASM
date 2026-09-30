@@ -2,7 +2,7 @@ name: build-and-deploy
 
 on:
   push:
-    branches: [main, wasm-port]
+    branches: [main, wasm-port, fstar-dev]
   workflow_dispatch:
 
 permissions:

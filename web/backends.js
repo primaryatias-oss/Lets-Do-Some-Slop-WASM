@@ -12,9 +12,9 @@ const list = [
   { id: 'zig',     name: 'Zig',                    kind: 'raw',     file: 'wasm/zig.wasm',     note: 'wasm32-freestanding' },
   { id: 'go',      name: 'Go',                     kind: 'wasi',    file: 'wasm/go.wasm',      note: 'wasip1 reactor + //go:wasmexport' },
   { id: 'nim',     name: 'Nim',                    kind: 'raw',     file: 'wasm/nim.wasm',     note: 'Nim -> C -> clang, no GC' },
-  { id: 'ocaml',   name: 'OCaml',                  kind: 'glue',    file: 'wasm/ocaml/core.js', note: 'wasm_of_ocaml (WasmGC)' },
+  { id: 'ocaml',   name: 'OCaml',                  kind: 'glue',    file: 'wasm/ocaml/glue.bc.wasm.js', note: 'wasm_of_ocaml (WasmGC)' },
   { id: 'haskell', name: 'Haskell',                kind: 'wasi',    file: 'wasm/haskell.wasm', note: 'GHC WebAssembly backend', hs: true },
-  { id: 'fstar',   name: 'F*',                     kind: 'glue',    file: 'wasm/fstar/core.js', note: 'F* -> OCaml -> wasm_of_ocaml' },
+  { id: 'fstar',   name: 'F*',                     kind: 'glue',    file: 'wasm/fstar/glue_fstar.bc.wasm.js', note: 'F* -> OCaml -> wasm_of_ocaml' },
 ];
 
 // -------- minimal WASI shim (enough for Go / GHC reactors) --------

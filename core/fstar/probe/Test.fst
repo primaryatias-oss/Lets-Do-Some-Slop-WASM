@@ -1,4 +1,5 @@
 module Test
+open FStar.All
 open Prim
 
 let p_x : int = 0

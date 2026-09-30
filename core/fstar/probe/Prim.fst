@@ -1,4 +1,5 @@
 module Prim
+open FStar.All
 (* opaque machine floats + a flat float memory, implemented by hand in prim.ml *)
 assume new type f64
 assume val lit : string -> f64

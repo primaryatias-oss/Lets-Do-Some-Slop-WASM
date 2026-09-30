@@ -1,0 +1,32 @@
+name: fstar-dev
+on:
+  push:
+    branches: [fstar-dev]
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: install F* release
+        run: |
+          curl -sL https://github.com/FStarLang/FStar/releases/download/v2026.09.27/fstar-v2026.09.27-Linux-x86_64.tar.gz -o fstar.tgz
+          mkdir -p $HOME/fst && tar xzf fstar.tgz -C $HOME/fst
+          echo "FST=$HOME/fst/fstar" >> $GITHUB_ENV
+      - name: look around
+        run: |
+          echo "--- bin"; ls -la $FST/bin
+          echo "--- lib/fstar"; ls $FST/lib/fstar | head -40
+          echo "--- lib/fstar/lib"; ls $FST/lib/fstar/lib | head -60
+          echo "--- lib/fstar/lib/app"; ls $FST/lib/fstar/lib/app | head -80
+          echo "--- ulib"; ls $FST/lib/fstar/ulib | head -30
+          echo "--- Float64.fsti"; find $FST -name 'FStar.Float64.fsti' -exec cat {} \;
+          echo "--- FStar_Float64.ml"; cat $FST/lib/fstar/lib/app/floats/FStar_Float64.ml
+          echo "--- Prims.ml"; cat $FST/lib/fstar/lib/app/Prims.ml
+          echo "--- FStar_Pervasives_Native.ml"; cat $FST/lib/fstar/lib/app/FStar_Pervasives_Native.ml
+          echo "--- z3?"; which z3 || ls $FST/bin
+      - name: extract probe
+        run: |
+          cd core/fstar/probe
+          $FST/bin/fstar.exe --lax --codegen OCaml --extract_module Test Prim.fst Test.fst 2>&1 | tail -30 || true
+          ls -la
+          echo "--- Test.ml"; cat Test.ml
